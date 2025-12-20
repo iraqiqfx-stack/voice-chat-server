@@ -483,10 +483,13 @@ model ReelComment {
   reelId    String
   userId    String
   content   String
+  parentId  String?  // للردود على التعليقات
   likes     Int      @default(0)
   createdAt DateTime @default(now())
   
   reel      Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  parent    ReelComment? @relation("ReelCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   ReelComment[] @relation("ReelCommentReplies")
   
   @@map("reel_comment")
 }

@@ -35,6 +35,7 @@ async function runMigrations() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "metadata" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "Comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "reel_comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
@@ -4887,7 +4888,7 @@ app.get('/api/reels/:reelId/comments', authenticate, async (req, res) => {
 app.post('/api/reels/:reelId/comments', authenticate, async (req, res) => {
     try {
         const { reelId } = req.params;
-        const { content } = req.body;
+        const { content, parentId } = req.body;
         
         if (!content?.trim()) {
             return res.status(400).json({ error: 'التعليق مطلوب' });
@@ -4897,9 +4898,49 @@ app.post('/api/reels/:reelId/comments', authenticate, async (req, res) => {
             data: {
                 reelId,
                 userId: req.user.id,
-                content: content.trim()
+                content: content.trim(),
+                parentId: parentId || null
+            },
+            include: {
+                parent: true
             }
         });
+        
+        // جلب بيانات صاحب التعليق الأصلي للإشعار
+        let parentComment = null;
+        if (parentId) {
+            parentComment = await prisma.reelComment.findUnique({
+                where: { id: parentId },
+                select: { userId: true }
+            });
+        }
+        
+        // إنشاء إشعار لصاحب الريل
+        const reel = await prisma.reel.findUnique({ where: { id: reelId } });
+        if (reel && reel.userId !== req.user.id) {
+            await prisma.notification.create({
+                data: {
+                    userId: reel.userId,
+                    type: 'comment',
+                    title: 'تعليق جديد',
+                    message: `${req.user.username} علق على الريل الخاص بك`,
+                    data: JSON.stringify({ reelId, commentId: comment.id })
+                }
+            });
+        }
+        
+        // إنشاء إشعار للشخص المرد عليه
+        if (parentId && parentComment && parentComment.userId !== req.user.id) {
+            await prisma.notification.create({
+                data: {
+                    userId: parentComment.userId,
+                    type: 'reply',
+                    title: 'رد جديد',
+                    message: `${req.user.username} رد على تعليقك`,
+                    data: JSON.stringify({ reelId, commentId: comment.id, parentId })
+                }
+            });
+        }
         
         res.json({
             ...comment,
