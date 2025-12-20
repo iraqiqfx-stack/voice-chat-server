@@ -1991,7 +1991,12 @@ app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
             where: { roomId: req.params.roomId, isPinned: true, isDeleted: false },
             include: {
                 user: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
-                giftMessage: { include: { gift: true } }
+                giftMessage: { include: { gift: true } },
+                replyTo: {
+                    include: {
+                        user: { select: { id: true, username: true, avatar: true } }
+                    }
+                }
             }
         });
         
@@ -1999,7 +2004,12 @@ app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
             where: { roomId: req.params.roomId, isDeleted: false },
             include: {
                 user: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
-                giftMessage: { include: { gift: true } }
+                giftMessage: { include: { gift: true } },
+                replyTo: {
+                    include: {
+                        user: { select: { id: true, username: true, avatar: true } }
+                    }
+                }
             },
             orderBy: { createdAt: 'desc' },
             take: limit
@@ -2021,7 +2031,7 @@ app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
 
 app.post('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
     try {
-        const { content } = req.body;
+        const { content, replyToId } = req.body;
         const roomId = req.params.roomId;
         
         // التحقق من الحظر
@@ -2042,14 +2052,30 @@ app.post('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'أنت مكتوم حالياً' });
         }
         
+        // التحقق من وجود الرسالة المرد عليها
+        if (replyToId) {
+            const replyToMessage = await prisma.chatMessage.findUnique({
+                where: { id: replyToId }
+            });
+            if (!replyToMessage || replyToMessage.roomId !== roomId) {
+                return res.status(400).json({ error: 'الرسالة المرد عليها غير موجودة' });
+            }
+        }
+        
         const message = await prisma.chatMessage.create({
             data: {
                 roomId: req.params.roomId,
                 userId: req.user.id,
-                content
+                content,
+                replyToId: replyToId || null
             },
             include: {
-                user: { select: { id: true, username: true, avatar: true, level: true, experience: true } }
+                user: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
+                replyTo: {
+                    include: {
+                        user: { select: { id: true, username: true, avatar: true } }
+                    }
+                }
             }
         });
         

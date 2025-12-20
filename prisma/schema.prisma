@@ -284,6 +284,7 @@ model ChatMessage {
   type          String       @default("text") // text, gift, system, join, leave
   metadata      String?      // JSON للبيانات الإضافية (مثل بيانات الهدية)
   giftMessageId String?      @unique
+  replyToId     String?      // معرف الرسالة المرد عليها
   isPinned      Boolean      @default(false)
   isDeleted     Boolean      @default(false)
   createdAt     DateTime     @default(now())
@@ -291,6 +292,8 @@ model ChatMessage {
   room          ChatRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user          User         @relation(fields: [userId], references: [id])
   giftMessage   GiftMessage? @relation(fields: [giftMessageId], references: [id])
+  replyTo       ChatMessage? @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       ChatMessage[] @relation("MessageReplies")
 }
 
 // =================== الهدايا ===================
