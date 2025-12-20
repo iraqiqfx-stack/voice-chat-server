@@ -2215,8 +2215,38 @@ app.post('/api/gifts/send', authenticate, async (req, res) => {
             await updateUserLevel(receiverId);
         }
         
-        // إضافة الكمية للاستجابة
-        res.json({ ...giftMessage, quantity: giftQuantity, totalPrice });
+        // إنشاء رسالة الهدية في الدردشة
+        const receiverUser = receiverId ? await prisma.user.findUnique({ 
+            where: { id: receiverId },
+            select: { username: true }
+        }) : null;
+        
+        const giftChatContent = `🎁 ${req.user.username} أرسل ${giftQuantity > 1 ? giftQuantity + '×' : ''} ${gift.image || '🎁'} ${gift.nameAr} إلى ${receiverUser?.username || 'الغرفة'}`;
+        
+        const chatMessage = await prisma.message.create({
+            data: {
+                roomId,
+                senderId: req.user.id,
+                content: giftChatContent,
+                type: 'gift',
+                metadata: JSON.stringify({
+                    giftId: gift.id,
+                    giftName: gift.nameAr,
+                    giftImage: gift.image,
+                    giftPrice: gift.price,
+                    quantity: giftQuantity,
+                    receiverId: receiverId || null,
+                    receiverName: receiverUser?.username || null,
+                    totalPrice: totalPrice
+                })
+            },
+            include: {
+                sender: { select: { id: true, username: true, avatar: true, level: true, experience: true } }
+            }
+        });
+        
+        // إضافة الكمية والرسالة للاستجابة
+        res.json({ ...giftMessage, quantity: giftQuantity, totalPrice, chatMessage });
         
     } catch (error) {
         console.error('Send gift error:', error);
