@@ -4,12 +4,15 @@ RUN apt-get update && apt-get install -y openssl libssl-dev ca-certificates && r
 
 WORKDIR /app
 
-COPY . .
+COPY package*.json ./
+COPY prisma ./prisma/
 
 RUN npm install --ignore-scripts
 
 RUN npx prisma generate
 
+COPY . .
+
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma db push && node server.js"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node server.js"]
