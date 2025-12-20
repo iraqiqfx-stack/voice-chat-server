@@ -3601,6 +3601,8 @@ app.post('/api/rooms/:roomId/voice/kick/:seatNumber', authenticate, async (req, 
 
 // تخزين الجولات النشطة في الذاكرة
 const activeBattles = new Map();
+// تخزين الفائزين مؤقتاً (لمدة دقيقة)
+const battleWinners = new Map(); // { roomId: { winnerTeam: 'A' | 'B', endTime: timestamp } }
 
 // بدء جولة جديدة
 app.post('/api/rooms/:roomId/battle/start', authenticate, async (req, res) => {
@@ -3703,8 +3705,12 @@ app.get('/api/rooms/:roomId/battle', authenticate, async (req, res) => {
         const { roomId } = req.params;
         const battle = activeBattles.get(roomId);
         
+        // التحقق من وجود فائز سابق (لعرض التاج)
+        const winner = battleWinners.get(roomId);
+        const winnerTeam = winner && winner.endTime > Date.now() ? winner.winnerTeam : null;
+        
         if (!battle) {
-            return res.json({ isActive: false });
+            return res.json({ isActive: false, winnerTeam });
         }
         
         // حساب الوقت المتبقي
@@ -3732,6 +3738,7 @@ app.get('/api/rooms/:roomId/battle', authenticate, async (req, res) => {
             isActive: true,
             ...battle,
             timeLeft,
+            winnerTeam,
         });
     } catch (error) {
         console.error('Get battle error:', error);
@@ -3975,6 +3982,18 @@ app.post('/api/rooms/:roomId/battle/end', authenticate, async (req, res) => {
             : null;
         
         activeBattles.delete(roomId);
+        
+        // حفظ الفائز مؤقتاً لمدة دقيقة (لعرض التاج)
+        if (winnerTeam && winnerTeam !== 'draw') {
+            battleWinners.set(roomId, {
+                winnerTeam,
+                endTime: Date.now() + 60000 // دقيقة واحدة
+            });
+            // حذف الفائز تلقائياً بعد دقيقة
+            setTimeout(() => {
+                battleWinners.delete(roomId);
+            }, 60000);
+        }
         
         res.json({
             success: true,
