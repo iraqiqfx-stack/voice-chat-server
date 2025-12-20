@@ -5199,18 +5199,23 @@ app.post('/api/stories/:storyId/view', authenticate, async (req, res) => {
             return res.json({ success: true });
         }
         
-        // تسجيل المشاهدة
-        await prisma.storyView.upsert({
-            where: { storyId_userId: { storyId, userId } },
-            create: { storyId, userId },
-            update: {}
+        // التحقق من وجود مشاهدة سابقة
+        const existingView = await prisma.storyView.findUnique({
+            where: { storyId_userId: { storyId, userId } }
         });
         
-        // زيادة عداد المشاهدات
-        await prisma.story.update({
-            where: { id: storyId },
-            data: { viewsCount: { increment: 1 } }
-        });
+        // تسجيل المشاهدة فقط إذا لم تكن موجودة
+        if (!existingView) {
+            await prisma.storyView.create({
+                data: { storyId, userId }
+            });
+            
+            // زيادة عداد المشاهدات فقط عند أول مشاهدة
+            await prisma.story.update({
+                where: { id: storyId },
+                data: { viewsCount: { increment: 1 } }
+            });
+        }
         
         res.json({ success: true });
     } catch (error) {
