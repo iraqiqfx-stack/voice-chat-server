@@ -14,6 +14,20 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dananeer-secret-key';
 
+// ============================================================
+// 🔄 تحديث قاعدة البيانات - إضافة الأعمدة الناقصة
+// ============================================================
+async function runMigrations() {
+    try {
+        console.log('🔄 جاري تحديث قاعدة البيانات...');
+        await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "metadata" TEXT;`);
+        console.log('✅ تم تحديث قاعدة البيانات بنجاح');
+    } catch (error) {
+        console.log('⚠️ تحذير migration:', error.message);
+    }
+}
+runMigrations();
+
 // Agora Credentials
 const AGORA_APP_ID = '3ec78bd9fee8454cbcce71edc778fe9c';
 const AGORA_APP_CERTIFICATE = '99f9cfd621ee4fa8ba01540a6b277d50';
