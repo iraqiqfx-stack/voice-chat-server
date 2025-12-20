@@ -11,11 +11,11 @@ async function createAdmin() {
     try {
         // إنشاء أو تحديث المستخدم
         const admin = await prisma.user.upsert({
-            where: { email: 'admin@dananeer.com' },
+            where: { email: 'admin@windo.com' },
             update: { password: adminPassword },
             create: {
                 username: 'Admin',
-                email: 'admin@dananeer.com',
+                email: 'admin@windo.com',
                 password: adminPassword,
                 referralCode: 'ADMIN001',
                 coins: 1000000,
@@ -25,14 +25,14 @@ async function createAdmin() {
         });
         
         // تحديث isAdmin باستخدام raw query
-        await prisma.$executeRaw`UPDATE User SET isAdmin = 1 WHERE email = 'admin@dananeer.com'`;
+        await prisma.$executeRaw`UPDATE User SET isAdmin = 1 WHERE email = 'admin@windo.com'`;
         
         console.log('✅ تم إنشاء/تحديث حساب المدير بنجاح!');
         console.log('');
         console.log('╔════════════════════════════════════════╗');
         console.log('║     بيانات الدخول للوحة التحكم        ║');
         console.log('╠════════════════════════════════════════╣');
-        console.log('║  📧 البريد: admin@dananeer.com        ║');
+        console.log('║  📧 البريد: admin@windo.com           ║');
         console.log('║  🔑 كلمة المرور: admin123             ║');
         console.log('╚════════════════════════════════════════╝');
         console.log('');

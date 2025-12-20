@@ -12,7 +12,7 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'dananeer-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'windo-secret-key';
 
 // ============================================================
 // 🔄 تحديث قاعدة البيانات - إضافة الأعمدة الناقصة
@@ -54,11 +54,24 @@ app.use(express.json());
 // تقديم الملفات الثابتة (الفيديوهات والصور)
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.static(path.join(__dirname, 'public')));
 // تقديم الملفات من المجلد الرئيسي أيضاً (للفيديوهات)
 app.use('/assets', express.static(__dirname));
+// تقديم الصور المرفوعة
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// إنشاء مجلد الرفع إذا لم يكن موجوداً
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// زيادة حجم الطلب للصور
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // ============================================================
 // 🔐 Middleware للتحقق من التوكن
@@ -292,7 +305,7 @@ app.post('/api/auth/register', async (req, res) => {
         await createNotification(
             user.id,
             'system',
-            '🎊 أهلاً بك في دنانير!',
+            '🎊 أهلاً بك في ويندو!',
             'حصلت على 100 عملة و 10 جواهر كهدية ترحيبية. استمتع بالتطبيق!',
             { coins: 100, gems: 10 }
         );
@@ -1443,6 +1456,26 @@ app.post('/api/rooms', authenticate, async (req, res) => {
             existingRoom = await prisma.chatRoom.findUnique({ where: { roomCode } });
         }
         
+        // معالجة الصورة إذا كانت Base64
+        let imageUrl = image;
+        if (image && image.startsWith('data:image')) {
+            const matches = image.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+            if (matches) {
+                const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+                const data = matches[2];
+                const buffer = Buffer.from(data, 'base64');
+                
+                if (buffer.length <= 5 * 1024 * 1024) {
+                    const filename = `room_${roomCode}_${Date.now()}.${ext}`;
+                    const filepath = path.join(__dirname, 'uploads', filename);
+                    fs.writeFileSync(filepath, buffer);
+                    
+                    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+                    imageUrl = `${baseUrl}/uploads/${filename}`;
+                }
+            }
+        }
+        
         // خصم المبلغ وإنشاء الغرفة
         const [_, room] = await prisma.$transaction([
             prisma.user.update({
@@ -1454,7 +1487,7 @@ app.post('/api/rooms', authenticate, async (req, res) => {
                     roomCode,
                     name,
                     description,
-                    image,
+                    image: imageUrl,
                     ownerId: req.user.id,
                     joinPrice: joinPrice || 0,
                     messagePrice: messagePrice || 0,
@@ -6256,6 +6289,175 @@ app.put('/api/admin/settings', authenticate, async (req, res) => {
 });
 
 // ============================================================
+// 📷 رفع الصور
+// ============================================================
+
+// رفع صورة (Base64)
+app.post('/api/upload', authenticate, async (req, res) => {
+    try {
+        const { image, type } = req.body; // type: 'avatar' | 'room' | 'post'
+        
+        if (!image) {
+            return res.status(400).json({ error: 'الصورة مطلوبة' });
+        }
+        
+        // استخراج البيانات من Base64
+        const matches = image.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+        if (!matches) {
+            return res.status(400).json({ error: 'صيغة الصورة غير صحيحة' });
+        }
+        
+        const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+        const data = matches[2];
+        const buffer = Buffer.from(data, 'base64');
+        
+        // التحقق من حجم الصورة (5MB max)
+        if (buffer.length > 5 * 1024 * 1024) {
+            return res.status(400).json({ error: 'حجم الصورة كبير جداً (الحد الأقصى 5MB)' });
+        }
+        
+        // إنشاء اسم فريد للملف
+        const filename = `${type || 'img'}_${req.user.id}_${Date.now()}.${ext}`;
+        const filepath = path.join(__dirname, 'uploads', filename);
+        
+        // حفظ الملف
+        fs.writeFileSync(filepath, buffer);
+        
+        // إرجاع رابط الصورة
+        const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+        const imageUrl = `${baseUrl}/uploads/${filename}`;
+        
+        res.json({ 
+            success: true, 
+            url: imageUrl,
+            filename 
+        });
+    } catch (error) {
+        console.error('Upload error:', error);
+        res.status(500).json({ error: 'فشل في رفع الصورة' });
+    }
+});
+
+// تحديث صورة الملف الشخصي
+app.put('/api/profile/avatar', authenticate, async (req, res) => {
+    try {
+        const { avatar } = req.body;
+        
+        if (!avatar) {
+            return res.status(400).json({ error: 'الصورة مطلوبة' });
+        }
+        
+        // إذا كانت الصورة Base64، نرفعها أولاً
+        let avatarUrl = avatar;
+        if (avatar.startsWith('data:image')) {
+            const matches = avatar.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+            if (!matches) {
+                return res.status(400).json({ error: 'صيغة الصورة غير صحيحة' });
+            }
+            
+            const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+            const data = matches[2];
+            const buffer = Buffer.from(data, 'base64');
+            
+            if (buffer.length > 5 * 1024 * 1024) {
+                return res.status(400).json({ error: 'حجم الصورة كبير جداً' });
+            }
+            
+            const filename = `avatar_${req.user.id}_${Date.now()}.${ext}`;
+            const filepath = path.join(__dirname, 'uploads', filename);
+            fs.writeFileSync(filepath, buffer);
+            
+            const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+            avatarUrl = `${baseUrl}/uploads/${filename}`;
+        }
+        
+        // تحديث المستخدم
+        const user = await prisma.user.update({
+            where: { id: req.user.id },
+            data: { avatar: avatarUrl }
+        });
+        
+        res.json({ 
+            success: true, 
+            avatar: user.avatar,
+            user: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                avatar: user.avatar,
+                coins: user.coins,
+                gems: user.gems,
+                level: user.level,
+                experience: user.experience
+            }
+        });
+    } catch (error) {
+        console.error('Avatar update error:', error);
+        res.status(500).json({ error: 'فشل في تحديث الصورة' });
+    }
+});
+
+// تحديث صورة الغرفة
+app.put('/api/rooms/:roomId/image', authenticate, async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const { image } = req.body;
+        
+        // التحقق من ملكية الغرفة
+        const room = await prisma.chatRoom.findUnique({ where: { id: roomId } });
+        if (!room) {
+            return res.status(404).json({ error: 'الغرفة غير موجودة' });
+        }
+        if (room.ownerId !== req.user.id && !req.user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح لك بتعديل هذه الغرفة' });
+        }
+        
+        if (!image) {
+            return res.status(400).json({ error: 'الصورة مطلوبة' });
+        }
+        
+        // رفع الصورة
+        let imageUrl = image;
+        if (image.startsWith('data:image')) {
+            const matches = image.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
+            if (!matches) {
+                return res.status(400).json({ error: 'صيغة الصورة غير صحيحة' });
+            }
+            
+            const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+            const data = matches[2];
+            const buffer = Buffer.from(data, 'base64');
+            
+            if (buffer.length > 5 * 1024 * 1024) {
+                return res.status(400).json({ error: 'حجم الصورة كبير جداً' });
+            }
+            
+            const filename = `room_${roomId}_${Date.now()}.${ext}`;
+            const filepath = path.join(__dirname, 'uploads', filename);
+            fs.writeFileSync(filepath, buffer);
+            
+            const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+            imageUrl = `${baseUrl}/uploads/${filename}`;
+        }
+        
+        // تحديث الغرفة
+        const updatedRoom = await prisma.chatRoom.update({
+            where: { id: roomId },
+            data: { image: imageUrl }
+        });
+        
+        res.json({ 
+            success: true, 
+            image: updatedRoom.image,
+            room: updatedRoom
+        });
+    } catch (error) {
+        console.error('Room image update error:', error);
+        res.status(500).json({ error: 'فشل في تحديث صورة الغرفة' });
+    }
+});
+
+// ============================================================
 // 🚀 تشغيل السيرفر
 // ============================================================
 
@@ -6263,7 +6465,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
     console.log('║                                                            ║');
-    console.log('║   🚀  دنانير Backend Server (Prisma + PostgreSQL)         ║');
+    console.log('║   🚀  ويندو Backend Server (Prisma + PostgreSQL)         ║');
     console.log('║                                                            ║');
     console.log(`║   📡  Server: http://0.0.0.0:${PORT}                          ║`);
     console.log(`║   🔗  API:    http://192.168.0.116:${PORT}/api               ║`);

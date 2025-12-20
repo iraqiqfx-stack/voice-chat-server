@@ -9,11 +9,11 @@ async function main() {
     // إنشاء حساب المدير
     const adminPassword = await bcrypt.hash('admin123', 10);
     await prisma.user.upsert({
-        where: { email: 'admin@dananeer.com' },
+        where: { email: 'admin@windo.com' },
         update: { isAdmin: true },
         create: {
             username: 'Admin',
-            email: 'admin@dananeer.com',
+            email: 'admin@windo.com',
             password: adminPassword,
             referralCode: 'ADMIN001',
             coins: 1000000,
@@ -23,7 +23,7 @@ async function main() {
         }
     });
     console.log('✅ تم إنشاء حساب المدير');
-    console.log('   📧 البريد: admin@dananeer.com');
+    console.log('   📧 البريد: admin@windo.com');
     console.log('   🔑 كلمة المرور: admin123');
 
     // إنشاء الإعدادات
