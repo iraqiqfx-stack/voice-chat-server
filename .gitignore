@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Database
+prisma/dev.db
+prisma/dev.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+*.tmp
+*.temp
+
+# Media files (optional - remove if you want to include them)
+*.mp4
+*.mp3
+*.wav

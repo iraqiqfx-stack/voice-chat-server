@@ -1,0 +1,541 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =================== المستخدم ===================
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique
+  email         String   @unique
+  password      String
+  avatar        String?
+  coins         Float    @default(0)
+  gems          Float    @default(0)
+  level         Int      @default(1)
+  experience    Int      @default(0)
+  referralCode  String   @unique
+  referredBy    String?
+  packageId     String?
+  lastHarvest   DateTime?
+  isOnline      Boolean  @default(false)
+  isPrivate     Boolean  @default(false)  // حساب خاص أو عام
+  isAdmin       Boolean  @default(false)  // هل المستخدم مدير
+  isBanned      Boolean  @default(false)  // هل المستخدم محظور
+  banReason     String?                   // سبب الحظر
+  lastSeen      DateTime @default(now())
+  createdAt     DateTime @default(now())
+  
+  // العلاقات
+  posts              Post[]
+  ownedRooms         ChatRoom[]      @relation("RoomOwner")
+  messages           ChatMessage[]
+  withdraws          WithdrawRequest[]
+  roomMemberships    RoomMember[]
+  moderatorRoles     RoomModerator[]
+  sentGifts          GiftMessage[]   @relation("GiftSender")
+  receivedGifts      GiftMessage[]   @relation("GiftReceiver")
+  comments           Comment[]
+  postLikes          PostLike[]
+  spinHistory        SpinHistory[]
+  notifications      Notification[]
+  referrals          User[]          @relation("Referrals")
+  referrer           User?           @relation("Referrals", fields: [referredBy], references: [id])
+  // نظام المتابعة
+  followers          Follow[]        @relation("Following")
+  following          Follow[]        @relation("Followers")
+  // الريلز
+  reels              Reel[]
+  // الستوريات
+  stories            Story[]
+}
+
+// =================== نظام المتابعة ===================
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String   // المتابِع
+  followingId String   // المتابَع
+  createdAt   DateTime @default(now())
+  
+  follower    User     @relation("Followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+  
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follow")
+}
+
+// =================== الإشعارات ===================
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // like, comment, gift, harvest, wheel, referral, system, game
+  title     String
+  message   String
+  data      String?  // JSON for additional data like postId, roomId, etc.
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// =================== المنشورات ===================
+model Post {
+  id        String     @id @default(uuid())
+  userId    String
+  content   String
+  imageUrl  String?
+  likes     Int        @default(0)
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id])
+  comments  Comment[]
+  postLikes PostLike[]
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model PostLike {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+  
+  @@unique([postId, userId])
+}
+
+// تتبع مشاهدات المنشورات لكل مستخدم
+model PostView {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  
+  @@unique([postId, userId], name: "postId_userId")
+  @@map("post_view")
+}
+
+// =================== الستوريات (Stories) ===================
+model Story {
+  id          String      @id @default(uuid())
+  userId      String
+  mediaUrl    String      // رابط الصورة أو الفيديو
+  mediaType   String      @default("image") // image, video
+  caption     String?     // نص اختياري
+  overlays    String?     // JSON للنصوص والملصقات المضافة
+  duration    Int         @default(5) // مدة العرض بالثواني
+  viewsCount  Int         @default(0)
+  expiresAt   DateTime    // تنتهي بعد 24 ساعة
+  createdAt   DateTime    @default(now())
+  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  views       StoryView[]
+  reactions   StoryReaction[]
+  
+  @@map("story")
+}
+
+// مشاهدات الستوري
+model StoryView {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String
+  createdAt DateTime @default(now())
+  
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  
+  @@unique([storyId, userId])
+  @@map("story_view")
+}
+
+// تفاعلات الستوري (إيموجي)
+model StoryReaction {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String
+  emoji     String   // 😍 ❤️ 😂 😮 😢 👏
+  createdAt DateTime @default(now())
+  
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  
+  @@unique([storyId, userId])
+  @@map("story_reaction")
+}
+
+// =================== غرف الدردشة ===================
+model ChatRoom {
+  id              String          @id @default(uuid())
+  roomCode        String          @unique // معرف الغرفة 6 أرقام
+  name            String
+  description     String?
+  image           String?
+  ownerId         String
+  level           Int             @default(1)
+  totalGiftPoints Float           @default(0)  // مجموع نقاط الهدايا (1 جوهرة = 1 نقطة)
+  isPublic        Boolean         @default(true)
+  maxMembers      Int             @default(500)
+  
+  // إعدادات الغرفة
+  messagePrice    Float           @default(0)  // سعر الرسالة بالجواهر (0 = مجاني)
+  joinPrice       Float           @default(0)  // سعر الانضمام بالجواهر (0 = مجاني)
+  isChatLocked    Boolean         @default(false) // قفل الدردشة
+  slowMode        Int             @default(0)  // تأخير بين الرسائل بالثواني (0 = معطل)
+  welcomeMessage  String?         // رسالة ترحيبية مخصصة عند دخول أي شخص
+  
+  createdAt       DateTime        @default(now())
+  
+  owner           User            @relation("RoomOwner", fields: [ownerId], references: [id])
+  messages        ChatMessage[]
+  members         RoomMember[]
+  moderators      RoomModerator[]
+  giftMessages    GiftMessage[]
+  bannedUsers     RoomBan[]
+}
+
+model RoomMember {
+  id        String   @id @default(uuid())
+  roomId    String
+  userId    String
+  role      String   @default("member") // owner, moderator, member
+  isMuted   Boolean  @default(false)
+  muteUntil DateTime?
+  isBanned  Boolean  @default(false)
+  isOnline  Boolean  @default(false) // موجود داخل الغرفة حالياً
+  lastSeen  DateTime @default(now())
+  joinedAt  DateTime @default(now())
+  
+  room      ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+  
+  @@unique([roomId, userId])
+}
+
+// تتبع الضيوف (غير الأعضاء) الموجودين في الغرفة
+model RoomPresence {
+  id        String   @id @default(uuid())
+  roomId    String
+  visitorId String
+  isGuest   Boolean  @default(true)
+  joinedAt  DateTime @default(now())
+  lastSeen  DateTime @default(now())
+  
+  @@unique([roomId, visitorId])
+}
+
+model RoomModerator {
+  id               String   @id @default(uuid())
+  roomId           String
+  userId           String
+  canKick          Boolean  @default(true)
+  canMute          Boolean  @default(true)
+  canBan           Boolean  @default(false)
+  canEditRoom      Boolean  @default(false)
+  canDeleteMessages Boolean @default(true)
+  canPinMessages   Boolean  @default(true)
+  assignedBy       String
+  assignedAt       DateTime @default(now())
+  
+  room             ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id])
+  
+  @@unique([roomId, userId])
+}
+
+// =================== حظر الغرف ===================
+model RoomBan {
+  id          String   @id @default(uuid())
+  roomId      String
+  userId      String
+  reason      String?
+  bannedById  String
+  expiresAt   DateTime? // null = حظر دائم
+  createdAt   DateTime @default(now())
+  
+  room        ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  @@unique([roomId, userId])
+  @@map("room_ban")
+}
+
+// =================== الرسائل ===================
+model ChatMessage {
+  id            String       @id @default(uuid())
+  roomId        String
+  userId        String
+  content       String
+  type          String       @default("text") // text, gift, system, join, leave
+  giftMessageId String?      @unique
+  isPinned      Boolean      @default(false)
+  isDeleted     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  
+  room          ChatRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user          User         @relation(fields: [userId], references: [id])
+  giftMessage   GiftMessage? @relation(fields: [giftMessageId], references: [id])
+}
+
+// =================== الهدايا ===================
+model Gift {
+  id              String   @id @default(uuid())
+  name            String
+  nameAr          String
+  price           Float
+  image           String   // مسار الصورة أو الرمز التعبيري
+  imageUrl        String?  // رابط الصورة المتحركة (GIF)
+  animation       String   // نوع الأنيميشن
+  animationDuration Int    @default(4)
+  color           String
+  rarity          String   @default("common") // common, rare, epic, legendary
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  
+  giftMessages    GiftMessage[]
+}
+
+model GiftMessage {
+  id         String   @id @default(uuid())
+  roomId     String
+  senderId   String
+  receiverId String?  // null = للكل
+  giftId     String
+  isForAll   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  
+  room       ChatRoom     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender     User         @relation("GiftSender", fields: [senderId], references: [id])
+  receiver   User?        @relation("GiftReceiver", fields: [receiverId], references: [id])
+  gift       Gift         @relation(fields: [giftId], references: [id])
+  message    ChatMessage?
+}
+
+// =================== المالية ===================
+model WithdrawRequest {
+  id        String   @id @default(uuid())
+  userId    String
+  amount    Float
+  status    String   @default("pending") // pending, approved, rejected
+  agentId   String
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  user      User     @relation(fields: [userId], references: [id])
+  agent     Agent    @relation(fields: [agentId], references: [id])
+}
+
+model Agent {
+  id        String            @id @default(uuid())
+  name      String
+  avatar    String?
+  phone     String?
+  status    String            @default("offline") // online, offline, busy
+  createdAt DateTime          @default(now())
+  
+  withdraws WithdrawRequest[]
+}
+
+// =================== عجلة الحظ ===================
+model WheelPrize {
+  id          String        @id @default(uuid())
+  name        String
+  value       Float
+  type        String        // coins, gems
+  color       String
+  probability Float         @default(10) // نسبة الفوز %
+  isActive    Boolean       @default(true)
+  
+  spinHistory SpinHistory[]
+}
+
+model SpinHistory {
+  id        String     @id @default(uuid())
+  userId    String
+  prizeId   String
+  createdAt DateTime   @default(now())
+  
+  user      User       @relation(fields: [userId], references: [id])
+  prize     WheelPrize @relation(fields: [prizeId], references: [id])
+}
+
+// =================== الإعدادات ===================
+model AppSettings {
+  id                String  @id @default("settings")
+  harvestCoins      Float   @default(100)
+  harvestGems       Float   @default(10)
+  harvestInterval   Int     @default(24) // ساعات
+  spinPrice         Float   @default(50)
+  exchangeRate      Float   @default(1000) // gems to coins
+  referralGems      Float   @default(50)
+  roomCreationPrice Float   @default(500)
+  minWithdraw       Float   @default(100)
+  maxWithdraw       Float   @default(10000)
+}
+
+// =================== الباقات ===================
+model Package {
+  id          String   @id @default(uuid())
+  name        String
+  nameAr      String
+  price       Float    // سعر الباقة بالجواهر
+  coinsReward Float    @default(100)  // ربح العملات اليومي
+  gemsReward  Float    @default(10)   // ربح الجواهر اليومي
+  duration    Int      @default(30)   // مدة الباقة بالأيام
+  features    String   @default("[]") // مميزات الباقة (JSON)
+  icon        String   @default("📦") // أيقونة الباقة
+  color       String   @default("#8B5CF6") // لون الباقة
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  purchases   UserPackage[]
+}
+
+// =================== باقات المستخدم (يمكن شراء نفس الباقة أكثر من مرة) ===================
+model UserPackage {
+  id          String   @id @default(uuid())
+  userId      String
+  packageId   String
+  purchasedAt DateTime @default(now())
+  expiresAt   DateTime // تاريخ انتهاء الباقة
+  isActive    Boolean  @default(true)
+  
+  package     Package  @relation(fields: [packageId], references: [id])
+  
+  @@index([userId])
+  @@index([packageId])
+  @@map("user_package")
+}
+
+
+// =================== المقاعد الصوتية ===================
+model VoiceSeat {
+  id        String   @id @default(uuid())
+  roomId    String
+  seatNumber Int     // 1-4
+  odId    String?  // المستخدم الجالس (null = فارغ)
+  isMuted   Boolean  @default(false)
+  isLocked  Boolean  @default(false)
+  joinedAt  DateTime?
+  
+  @@unique([roomId, seatNumber])
+  @@map("voice_seat")
+}
+
+// =================== الريلز (Reels) ===================
+model Reel {
+  id          String      @id @default(uuid())
+  userId      String
+  videoUrl    String      // رابط الفيديو
+  thumbnailUrl String?    // صورة مصغرة للتحميل السريع
+  caption     String?     // وصف الريل
+  duration    Int         @default(0) // مدة الفيديو بالثواني
+  views       Int         @default(0)
+  likes       Int         @default(0)
+  isPublic    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reelLikes   ReelLike[]
+  reelComments ReelComment[]
+  reelViews   ReelView[]
+  
+  @@map("reel")
+}
+
+model ReelLike {
+  id        String   @id @default(uuid())
+  reelId    String
+  userId    String
+  createdAt DateTime @default(now())
+  
+  reel      Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  
+  @@unique([reelId, userId])
+  @@map("reel_like")
+}
+
+model ReelComment {
+  id        String   @id @default(uuid())
+  reelId    String
+  userId    String
+  content   String
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+  
+  reel      Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  
+  @@map("reel_comment")
+}
+
+// تتبع مشاهدات الريلز لكل مستخدم
+model ReelView {
+  id        String   @id @default(uuid())
+  reelId    String
+  userId    String
+  watchTime Int      @default(0) // مدة المشاهدة بالثواني
+  completed Boolean  @default(false) // هل شاهد الريل كاملاً
+  createdAt DateTime @default(now())
+  
+  reel      Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  
+  @@unique([reelId, userId])
+  @@map("reel_view")
+}
+
+// =================== الدردشة الخاصة (Direct Messages) ===================
+model DirectConversation {
+  id            String    @id @default(uuid())
+  user1Id       String    // المستخدم الأول
+  user2Id       String    // المستخدم الثاني
+  lastMessageAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  
+  // حالة المحادثة لكل مستخدم
+  user1Accepted Boolean   @default(false) // هل قبل المستخدم 1 المحادثة
+  user2Accepted Boolean   @default(false) // هل قبل المستخدم 2 المحادثة
+  user1Deleted  Boolean   @default(false) // هل حذف المستخدم 1 المحادثة
+  user2Deleted  Boolean   @default(false) // هل حذف المستخدم 2 المحادثة
+  
+  messages      DirectMessage[]
+  
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([lastMessageAt])
+  @@map("direct_conversation")
+}
+
+model DirectMessage {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  messageType    String   @default("text") // text, image, voice, gift, shared_post, shared_reel, shared_story
+  metadata       String?  // JSON للبيانات الإضافية (مثل المحتوى المشارك)
+  isRead         Boolean  @default(false)
+  isDeleted      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@index([conversationId])
+  @@index([senderId])
+  @@map("direct_message")
+}
