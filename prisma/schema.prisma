@@ -282,6 +282,7 @@ model ChatMessage {
   userId        String
   content       String
   type          String       @default("text") // text, gift, system, join, leave
+  metadata      String?      // JSON للبيانات الإضافية (مثل بيانات الهدية)
   giftMessageId String?      @unique
   isPinned      Boolean      @default(false)
   isDeleted     Boolean      @default(false)

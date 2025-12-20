@@ -2223,20 +2223,8 @@ app.post('/api/gifts/send', authenticate, async (req, res) => {
         
         const giftChatContent = `🎁 ${req.user.username} أرسل ${giftQuantity > 1 ? giftQuantity + '×' : ''} ${gift.image || '🎁'} ${gift.nameAr} إلى ${receiverUser?.username || 'الغرفة'}`;
         
-        const chatMessage = await prisma.chatMessage.create({
-            data: {
-                roomId,
-                userId: req.user.id,
-                content: giftChatContent,
-                type: 'gift',
-            },
-            include: {
-                user: { select: { id: true, username: true, avatar: true, level: true, experience: true } }
-            }
-        });
-        
-        // إضافة metadata للرسالة
-        chatMessage.metadata = {
+        // إنشاء metadata للهدية
+        const giftMetadata = JSON.stringify({
             giftId: gift.id,
             giftName: gift.nameAr,
             giftImage: gift.image,
@@ -2245,7 +2233,23 @@ app.post('/api/gifts/send', authenticate, async (req, res) => {
             receiverId: receiverId || null,
             receiverName: receiverUser?.username || null,
             totalPrice: totalPrice
-        };
+        });
+        
+        const chatMessage = await prisma.chatMessage.create({
+            data: {
+                roomId,
+                userId: req.user.id,
+                content: giftChatContent,
+                type: 'gift',
+                metadata: giftMetadata,
+            },
+            include: {
+                user: { select: { id: true, username: true, avatar: true, level: true, experience: true } }
+            }
+        });
+        
+        // إضافة metadata كـ object للاستجابة
+        chatMessage.metadata = JSON.parse(giftMetadata);
         
         // إضافة الكمية والرسالة للاستجابة
         res.json({ ...giftMessage, quantity: giftQuantity, totalPrice, chatMessage });
