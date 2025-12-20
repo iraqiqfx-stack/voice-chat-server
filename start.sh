@@ -1,5 +1,5 @@
 #!/bin/sh
 echo "Running database migration..."
-npx prisma db push --accept-data-loss
+node migrate.js
 echo "Starting server..."
 node server.js
