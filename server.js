@@ -1260,6 +1260,31 @@ app.post('/api/posts/:postId/like', authenticate, async (req, res) => {
     }
 });
 
+// جلب تعليقات منشور
+app.get('/api/posts/:postId/comments', authenticate, async (req, res) => {
+    try {
+        const { postId } = req.params;
+        
+        const comments = await prisma.comment.findMany({
+            where: { postId },
+            include: {
+                user: { select: { id: true, username: true, avatar: true } },
+                parent: {
+                    include: {
+                        user: { select: { id: true, username: true } }
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        
+        res.json(comments);
+    } catch (error) {
+        console.error('Get comments error:', error);
+        res.status(500).json({ error: 'خطأ في جلب التعليقات' });
+    }
+});
+
 app.post('/api/posts/:postId/comment', authenticate, async (req, res) => {
     try {
         const { postId } = req.params;
