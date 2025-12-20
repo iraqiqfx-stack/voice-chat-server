@@ -2,13 +2,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
-
-COPY prisma ./prisma
-RUN npx prisma generate
-
+# نسخ كل الملفات أولاً
 COPY . .
+
+# تثبيت التبعيات بدون تشغيل postinstall
+RUN npm install --ignore-scripts
+
+# توليد Prisma Client
+RUN npx prisma generate
 
 EXPOSE 3000
 
