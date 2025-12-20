@@ -13,6 +13,8 @@ RUN npx prisma generate
 
 COPY . .
 
+RUN chmod +x start.sh
+
 EXPOSE 3000
 
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node server.js"]
+CMD ["./start.sh"]
