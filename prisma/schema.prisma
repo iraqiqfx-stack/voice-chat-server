@@ -106,9 +106,12 @@ model Comment {
   postId    String
   userId    String
   content   String
+  parentId  String?  // للردود على التعليقات
   createdAt DateTime @default(now())
   post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id])
+  parent    Comment? @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
 }
 
 model PostLike {
