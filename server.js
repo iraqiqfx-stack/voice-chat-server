@@ -1986,6 +1986,15 @@ app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
         // جلب آخر 20 رسالة فقط عند دخول المستخدم
         const limit = parseInt(req.query.limit) || 20;
         
+        // جلب الرسالة المثبتة أولاً (إذا وجدت)
+        const pinnedMessage = await prisma.chatMessage.findFirst({
+            where: { roomId: req.params.roomId, isPinned: true, isDeleted: false },
+            include: {
+                user: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
+                giftMessage: { include: { gift: true } }
+            }
+        });
+        
         const messages = await prisma.chatMessage.findMany({
             where: { roomId: req.params.roomId, isDeleted: false },
             include: {
@@ -1995,8 +2004,16 @@ app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
             orderBy: { createdAt: 'desc' },
             take: limit
         });
+        
         // إرجاع الرسائل بترتيب تصاعدي (الأقدم أولاً)
-        res.json(messages.reverse());
+        let result = messages.reverse();
+        
+        // إضافة الرسالة المثبتة إذا لم تكن ضمن الرسائل المجلوبة
+        if (pinnedMessage && !result.find(m => m.id === pinnedMessage.id)) {
+            result = [pinnedMessage, ...result];
+        }
+        
+        res.json(result);
     } catch (error) {
         res.status(500).json({ error: 'خطأ في جلب الرسائل' });
     }
@@ -3081,9 +3098,18 @@ app.post('/api/rooms/:roomId/messages/:messageId/pin', authenticate, async (req,
             return res.status(403).json({ error: 'غير مصرح' });
         }
         
+        // إلغاء تثبيت أي رسالة سابقة (رسالة واحدة مثبتة فقط)
+        await prisma.chatMessage.updateMany({
+            where: { roomId: req.params.roomId, isPinned: true },
+            data: { isPinned: false }
+        });
+        
         const message = await prisma.chatMessage.update({
             where: { id: req.params.messageId },
-            data: { isPinned: true }
+            data: { isPinned: true },
+            include: {
+                user: { select: { id: true, username: true, avatar: true, level: true } }
+            }
         });
         
         res.json(message);
