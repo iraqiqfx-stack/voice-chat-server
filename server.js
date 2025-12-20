@@ -14,6 +14,18 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'windo-secret-key';
 
+// تحديد BASE_URL تلقائياً
+const getBaseUrl = () => {
+    if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+        return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+    }
+    if (process.env.BASE_URL) {
+        return process.env.BASE_URL;
+    }
+    return `http://localhost:${PORT}`;
+};
+const BASE_URL = getBaseUrl();
+
 // ============================================================
 // 🔄 تحديث قاعدة البيانات - إضافة الأعمدة الناقصة
 // ============================================================
@@ -1470,8 +1482,7 @@ app.post('/api/rooms', authenticate, async (req, res) => {
                     const filepath = path.join(__dirname, 'uploads', filename);
                     fs.writeFileSync(filepath, buffer);
                     
-                    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-                    imageUrl = `${baseUrl}/uploads/${filename}`;
+                    imageUrl = `${BASE_URL}/uploads/${filename}`;
                 }
             }
         }
@@ -6324,8 +6335,7 @@ app.post('/api/upload', authenticate, async (req, res) => {
         fs.writeFileSync(filepath, buffer);
         
         // إرجاع رابط الصورة
-        const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-        const imageUrl = `${baseUrl}/uploads/${filename}`;
+        const imageUrl = `${BASE_URL}/uploads/${filename}`;
         
         res.json({ 
             success: true, 
@@ -6367,8 +6377,7 @@ app.put('/api/profile/avatar', authenticate, async (req, res) => {
             const filepath = path.join(__dirname, 'uploads', filename);
             fs.writeFileSync(filepath, buffer);
             
-            const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-            avatarUrl = `${baseUrl}/uploads/${filename}`;
+            avatarUrl = `${BASE_URL}/uploads/${filename}`;
         }
         
         // تحديث المستخدم
@@ -6436,8 +6445,7 @@ app.put('/api/rooms/:roomId/image', authenticate, async (req, res) => {
             const filepath = path.join(__dirname, 'uploads', filename);
             fs.writeFileSync(filepath, buffer);
             
-            const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-            imageUrl = `${baseUrl}/uploads/${filename}`;
+            imageUrl = `${BASE_URL}/uploads/${filename}`;
         }
         
         // تحديث الغرفة
