@@ -33,6 +33,7 @@ async function runMigrations() {
     try {
         console.log('🔄 جاري تحديث قاعدة البيانات...');
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "metadata" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
