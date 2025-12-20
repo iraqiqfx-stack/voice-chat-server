@@ -1,14 +1,13 @@
-FROM node:20-alpine
+FROM node:20-slim
+
+RUN apt-get update && apt-get install -y openssl libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# نسخ كل الملفات أولاً
 COPY . .
 
-# تثبيت التبعيات بدون تشغيل postinstall
 RUN npm install --ignore-scripts
 
-# توليد Prisma Client
 RUN npx prisma generate
 
 EXPOSE 3000
