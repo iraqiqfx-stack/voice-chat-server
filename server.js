@@ -4,8 +4,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
-import pkg from 'agora-token';
-const { RtcTokenBuilder, RtcRole } = pkg;
 
 dotenv.config();
 
@@ -43,9 +41,8 @@ async function runMigrations() {
 }
 runMigrations();
 
-// Agora Credentials
-const AGORA_APP_ID = '3ec78bd9fee8454cbcce71edc778fe9c';
-const AGORA_APP_CERTIFICATE = '99f9cfd621ee4fa8ba01540a6b277d50';
+// Voice Server URL
+const VOICE_SERVER_URL = 'http://62.84.176.222:3001';
 
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
@@ -3448,43 +3445,21 @@ async function finishGame(gameId) {
 // 🎤 APIs المقاعد الصوتية
 // ============================================================
 
-// إنشاء Agora Token
+// جلب معلومات السيرفر الصوتي الخاص
 app.get('/api/rooms/:roomId/voice/token', authenticate, async (req, res) => {
     try {
         const { roomId } = req.params;
         const userId = req.user.id;
         
-        // اسم القناة = room_roomId
-        const channelName = `room_${roomId}`;
-        
-        // تحويل جزء من userId إلى رقم للـ uid
-        const uid = parseInt(userId.slice(-6), 16) || Math.floor(Math.random() * 100000);
-        
-        // صلاحية التوكن (24 ساعة)
-        const expirationTimeInSeconds = 86400;
-        const currentTimestamp = Math.floor(Date.now() / 1000);
-        const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-        
-        // إنشاء التوكن
-        const token = RtcTokenBuilder.buildTokenWithUid(
-            AGORA_APP_ID,
-            AGORA_APP_CERTIFICATE,
-            channelName,
-            uid,
-            RtcRole.PUBLISHER,
-            privilegeExpiredTs,
-            privilegeExpiredTs
-        );
-        
+        // إرجاع معلومات السيرفر الصوتي الخاص
         res.json({ 
-            token, 
-            channelName, 
-            uid,
-            appId: AGORA_APP_ID 
+            voiceServerUrl: VOICE_SERVER_URL,
+            roomId,
+            userId
         });
     } catch (error) {
-        console.error('Generate Agora token error:', error);
-        res.status(500).json({ error: 'خطأ في إنشاء توكن الصوت' });
+        console.error('Get voice server info error:', error);
+        res.status(500).json({ error: 'خطأ في جلب معلومات السيرفر الصوتي' });
     }
 });
 
