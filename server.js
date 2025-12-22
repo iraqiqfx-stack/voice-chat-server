@@ -6617,7 +6617,7 @@ const LIVEKIT_API_KEY = 'windo_key';
 const LIVEKIT_API_SECRET = 'windo_secret_2024_very_long_key';
 
 // إنشاء LiveKit Token
-app.post('/api/voice/livekit-token', authenticateToken, async (req, res) => {
+app.post('/api/voice/livekit-token', authenticate, async (req, res) => {
     try {
         const { roomId } = req.body;
         const userId = req.user.userId;
