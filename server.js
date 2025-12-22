@@ -1730,6 +1730,19 @@ app.post('/api/rooms/:roomId/presence/join', authenticate, async (req, res) => {
             where: { roomId_userId: { roomId, userId } }
         });
         
+        // التحقق إذا كان المستخدم موجود مسبقاً (لتجنب تكرار رسالة الدخول)
+        let wasAlreadyPresent = false;
+        if (member && member.isOnline) {
+            wasAlreadyPresent = true;
+        } else {
+            const existingPresence = await prisma.roomPresence.findUnique({
+                where: { roomId_visitorId: { roomId, visitorId: userId } }
+            });
+            if (existingPresence) {
+                wasAlreadyPresent = true;
+            }
+        }
+        
         if (member) {
             // تحديث حالة العضو كـ "موجود في الغرفة"
             await prisma.roomMember.update({
@@ -1746,6 +1759,18 @@ app.post('/api/rooms/:roomId/presence/join', authenticate, async (req, res) => {
                 where: { roomId_visitorId: { roomId, visitorId: userId } },
                 create: { roomId, visitorId: userId, isGuest: true },
                 update: { lastSeen: new Date() }
+            });
+        }
+        
+        // إنشاء رسالة دخول فقط إذا لم يكن موجود مسبقاً
+        if (!wasAlreadyPresent) {
+            await prisma.chatMessage.create({
+                data: {
+                    roomId,
+                    userId,
+                    content: 'انضم للغرفة',
+                    type: 'join'
+                }
             });
         }
         
@@ -6581,6 +6606,50 @@ app.put('/api/rooms/:roomId/image', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Room image update error:', error);
         res.status(500).json({ error: 'فشل في تحديث صورة الغرفة' });
+    }
+});
+
+// ============================================================
+// 🎙️ LiveKit Token Generation
+// ============================================================
+
+const LIVEKIT_API_KEY = 'windo_key';
+const LIVEKIT_API_SECRET = 'windo_secret_2024_very_long_key';
+
+// إنشاء LiveKit Token
+app.post('/api/voice/livekit-token', authenticateToken, async (req, res) => {
+    try {
+        const { roomId } = req.body;
+        const userId = req.user.userId;
+        
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ error: 'المستخدم غير موجود' });
+        }
+
+        // إنشاء JWT token لـ LiveKit
+        const now = Math.floor(Date.now() / 1000);
+        const payload = {
+            exp: now + 3600, // ساعة واحدة
+            iss: LIVEKIT_API_KEY,
+            sub: userId,
+            name: user.username,
+            nbf: now,
+            video: {
+                room: roomId,
+                roomJoin: true,
+                canPublish: true,
+                canSubscribe: true,
+                canPublishData: true,
+            },
+        };
+
+        const token = jwt.sign(payload, LIVEKIT_API_SECRET, { algorithm: 'HS256' });
+        
+        res.json({ token });
+    } catch (error) {
+        console.error('LiveKit token error:', error);
+        res.status(500).json({ error: 'فشل في إنشاء token' });
     }
 });
 
