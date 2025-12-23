@@ -1722,7 +1722,7 @@ app.post('/api/rooms/:roomId/presence/join', authenticate, async (req, res) => {
         });
         
         if (ban) {
-            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', banned: true });
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
         }
         
         // التحقق من العضوية
@@ -1899,13 +1899,21 @@ app.post('/api/rooms/:roomId/ban', authenticate, async (req, res) => {
             });
         }
         
+        // إنزال المستخدم من المايك
+        await prisma.voiceSeat.updateMany({
+            where: { roomId, odId: userId },
+            data: { odId: null, isMuted: false, joinedAt: null }
+        });
+        
         // حذف العضوية والحضور
         await Promise.all([
             prisma.roomMember.deleteMany({ where: { roomId, userId } }),
             prisma.roomPresence.deleteMany({ where: { roomId, visitorId: userId } })
         ]);
         
-        res.json({ success: true, banned: true });
+        console.log(`🚫 User ${userId} banned from room ${roomId}`);
+        // roomBanned بدلاً من banned لتمييزه عن حظر الحساب
+        res.json({ success: true, roomBanned: true });
     } catch (error) {
         console.error('Ban error:', error);
         res.status(500).json({ error: 'خطأ في الحظر' });
