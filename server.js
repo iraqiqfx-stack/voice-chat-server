@@ -3126,7 +3126,6 @@ app.post('/api/rooms/:roomId/unban/:userId', authenticate, async (req, res) => {
         res.status(500).json({ error: 'خطأ في إلغاء حظر العضو' });
     }
 });
-});
 
 // طرد عضو
 app.post('/api/rooms/:roomId/kick/:userId', authenticate, async (req, res) => {
