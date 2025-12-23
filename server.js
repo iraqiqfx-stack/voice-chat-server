@@ -1642,6 +1642,23 @@ app.post('/api/rooms/:roomId/leave', authenticate, async (req, res) => {
     }
 });
 
+// التحقق من حظر المستخدم من الغرفة
+app.get('/api/rooms/:roomId/check-ban', authenticate, async (req, res) => {
+    try {
+        const member = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId: req.params.roomId, userId: req.user.id } }
+        });
+        
+        if (member && member.isBanned) {
+            return res.json({ isBanned: true });
+        }
+        
+        res.json({ isBanned: false });
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في التحقق' });
+    }
+});
+
 // أعضاء الغرفة
 app.get('/api/rooms/:roomId/members', authenticate, async (req, res) => {
     try {
@@ -1716,7 +1733,7 @@ app.post('/api/rooms/:roomId/presence/join', authenticate, async (req, res) => {
         const roomId = req.params.roomId;
         const userId = req.user.id;
         
-        // التحقق من الحظر
+        // التحقق من الحظر في جدول RoomBan
         const ban = await prisma.roomBan.findUnique({
             where: { roomId_userId: { roomId, userId } }
         });
@@ -1725,10 +1742,15 @@ app.post('/api/rooms/:roomId/presence/join', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
         }
         
-        // التحقق من العضوية
+        // التحقق من العضوية والحظر فيها
         const member = await prisma.roomMember.findUnique({
             where: { roomId_userId: { roomId, userId } }
         });
+        
+        // التحقق من الحظر في العضوية
+        if (member && member.isBanned) {
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
+        }
         
         // التحقق إذا كان المستخدم موجود مسبقاً (لتجنب تكرار رسالة الدخول)
         let wasAlreadyPresent = false;
@@ -1905,11 +1927,25 @@ app.post('/api/rooms/:roomId/ban', authenticate, async (req, res) => {
             data: { odId: null, isMuted: false, joinedAt: null }
         });
         
-        // حذف العضوية والحضور
-        await Promise.all([
-            prisma.roomMember.deleteMany({ where: { roomId, userId } }),
-            prisma.roomPresence.deleteMany({ where: { roomId, visitorId: userId } })
-        ]);
+        // تحديث العضوية لتكون محظورة بدلاً من حذفها
+        const existingMember = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId, userId } }
+        });
+        
+        if (existingMember) {
+            await prisma.roomMember.update({
+                where: { roomId_userId: { roomId, userId } },
+                data: { isBanned: true, isOnline: false }
+            });
+        } else {
+            // إنشاء سجل عضوية محظورة إذا لم يكن موجوداً
+            await prisma.roomMember.create({
+                data: { roomId, userId, isBanned: true, isOnline: false }
+            });
+        }
+        
+        // حذف الحضور فقط
+        await prisma.roomPresence.deleteMany({ where: { roomId, visitorId: userId } });
         
         console.log(`🚫 User ${userId} banned from room ${roomId}`);
         // roomBanned بدلاً من banned لتمييزه عن حظر الحساب
@@ -2111,19 +2147,24 @@ app.post('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
         const { content, replyToId } = req.body;
         const roomId = req.params.roomId;
         
-        // التحقق من الحظر
+        // التحقق من الحظر في جدول RoomBan
         const ban = await prisma.roomBan.findUnique({
             where: { roomId_userId: { roomId, userId: req.user.id } }
         });
         
         if (ban) {
-            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة' });
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
         }
         
-        // التحقق من الكتم
+        // التحقق من الكتم والحظر في العضوية
         const member = await prisma.roomMember.findUnique({
             where: { roomId_userId: { roomId, userId: req.user.id } }
         });
+        
+        // التحقق من الحظر في العضوية
+        if (member?.isBanned) {
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
+        }
         
         if (member?.isMuted && member.muteUntil > new Date()) {
             return res.status(403).json({ error: 'أنت مكتوم حالياً' });
@@ -2990,23 +3031,57 @@ app.post('/api/rooms/:roomId/ban/:userId', authenticate, async (req, res) => {
         const { reason, duration } = req.body; // duration بالدقائق، null = دائم
         const expiresAt = duration ? new Date(Date.now() + duration * 60000) : null;
         
-        await prisma.roomMember.update({
-            where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } },
-            data: { isBanned: true }
+        // تحديث العضوية لتكون محظورة
+        const existingMember = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } }
         });
         
-        const ban = await prisma.roomBan.create({
-            data: {
-                roomId: req.params.roomId,
-                odId: req.params.userId,
-                reason,
-                bannedBy: req.user.id,
-                expiresAt
-            }
+        if (existingMember) {
+            await prisma.roomMember.update({
+                where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } },
+                data: { isBanned: true, isOnline: false }
+            });
+        } else {
+            await prisma.roomMember.create({
+                data: { roomId: req.params.roomId, userId: req.params.userId, isBanned: true, isOnline: false }
+            });
+        }
+        
+        // إنشاء سجل الحظر
+        const existingBan = await prisma.roomBan.findUnique({
+            where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } }
         });
+        
+        let ban;
+        if (existingBan) {
+            ban = await prisma.roomBan.update({
+                where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } },
+                data: { reason, bannedById: req.user.id, expiresAt }
+            });
+        } else {
+            ban = await prisma.roomBan.create({
+                data: {
+                    roomId: req.params.roomId,
+                    userId: req.params.userId,
+                    reason,
+                    bannedById: req.user.id,
+                    expiresAt
+                }
+            });
+        }
+        
+        // إنزال من المايك
+        await prisma.voiceSeat.updateMany({
+            where: { roomId: req.params.roomId, odId: req.params.userId },
+            data: { odId: null, isMuted: false, joinedAt: null }
+        });
+        
+        // حذف الحضور
+        await prisma.roomPresence.deleteMany({ where: { roomId: req.params.roomId, visitorId: req.params.userId } });
         
         res.json(ban);
     } catch (error) {
+        console.error('Ban error:', error);
         res.status(500).json({ error: 'خطأ في حظر العضو' });
     }
 });
@@ -3028,19 +3103,29 @@ app.post('/api/rooms/:roomId/unban/:userId', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'غير مصرح' });
         }
         
-        await prisma.roomMember.update({
-            where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } },
-            data: { isBanned: false }
+        // تحديث العضوية لإلغاء الحظر
+        const existingMember = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } }
         });
         
+        if (existingMember) {
+            await prisma.roomMember.update({
+                where: { roomId_userId: { roomId: req.params.roomId, userId: req.params.userId } },
+                data: { isBanned: false }
+            });
+        }
+        
+        // حذف سجل الحظر
         await prisma.roomBan.deleteMany({
-            where: { roomId: req.params.roomId, odId: req.params.userId }
+            where: { roomId: req.params.roomId, userId: req.params.userId }
         });
         
         res.json({ success: true });
     } catch (error) {
+        console.error('Unban error:', error);
         res.status(500).json({ error: 'خطأ في إلغاء حظر العضو' });
     }
+});
 });
 
 // طرد عضو
@@ -3558,6 +3643,15 @@ app.post('/api/rooms/:roomId/voice/join/:seatNumber', authenticate, async (req, 
         const { roomId, seatNumber } = req.params;
         const userId = req.user.id;
         const seatNum = parseInt(seatNumber);
+        
+        // التحقق من الحظر أولاً
+        const member = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId, userId } }
+        });
+        
+        if (member && member.isBanned) {
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
+        }
         
         // التحقق من أن المقعد موجود وفارغ
         const seat = await prisma.voiceSeat.findUnique({
