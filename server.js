@@ -1947,9 +1947,24 @@ app.post('/api/rooms/:roomId/ban', authenticate, async (req, res) => {
         // حذف الحضور فقط
         await prisma.roomPresence.deleteMany({ where: { roomId, visitorId: userId } });
         
+        // إنشاء رسالة نظام للإعلان عن الحظر
+        const bannedUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { username: true }
+        });
+        
+        await prisma.chatMessage.create({
+            data: {
+                roomId,
+                userId: req.user.id,
+                content: `تم حظر ${bannedUser?.username || 'مستخدم'} من الغرفة`,
+                type: 'system'
+            }
+        });
+        
         console.log(`🚫 User ${userId} banned from room ${roomId}`);
         // roomBanned بدلاً من banned لتمييزه عن حظر الحساب
-        res.json({ success: true, roomBanned: true });
+        res.json({ success: true, roomBanned: true, bannedUserId: userId });
     } catch (error) {
         console.error('Ban error:', error);
         res.status(500).json({ error: 'خطأ في الحظر' });
@@ -2096,6 +2111,27 @@ app.post('/api/rooms/:roomId/unban/:userId', authenticate, async (req, res) => {
 
 app.get('/api/rooms/:roomId/messages', authenticate, async (req, res) => {
     try {
+        const roomId = req.params.roomId;
+        const userId = req.user.id;
+        
+        // التحقق من الحظر
+        const member = await prisma.roomMember.findUnique({
+            where: { roomId_userId: { roomId, userId } }
+        });
+        
+        if (member?.isBanned) {
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
+        }
+        
+        // التحقق من الحظر في جدول RoomBan
+        const ban = await prisma.roomBan.findUnique({
+            where: { roomId_userId: { roomId, userId } }
+        });
+        
+        if (ban) {
+            return res.status(403).json({ error: 'أنت محظور من هذه الغرفة', roomBanned: true });
+        }
+        
         // جلب آخر 20 رسالة فقط عند دخول المستخدم
         const limit = parseInt(req.query.limit) || 20;
         
