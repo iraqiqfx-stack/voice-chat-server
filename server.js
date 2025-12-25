@@ -2793,7 +2793,7 @@ app.post('/api/wheel/spin', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 💰 APIs السحب
+// 💰 APIs السحب والتحويل
 // ============================================================
 
 app.get('/api/agents', authenticate, async (req, res) => {
@@ -2802,6 +2802,64 @@ app.get('/api/agents', authenticate, async (req, res) => {
         res.json(agents);
     } catch (error) {
         res.status(500).json({ error: 'خطأ في جلب الوكلاء' });
+    }
+});
+
+// جلب سعر الصرف
+app.get('/api/settings/exchange-rate', authenticate, async (req, res) => {
+    try {
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        res.json({ exchangeRate: settings?.exchangeRate || 1000 });
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب سعر الصرف' });
+    }
+});
+
+// تحويل عملات إلى جواهر
+app.post('/api/exchange/coins-to-gems', authenticate, async (req, res) => {
+    try {
+        const { amount } = req.body;
+        const coinsAmount = parseInt(amount);
+        
+        if (!coinsAmount || coinsAmount < 100) {
+            return res.status(400).json({ error: 'الحد الأدنى للتحويل 100 عملة' });
+        }
+        
+        // جلب سعر الصرف
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        const exchangeRate = settings?.exchangeRate || 1000;
+        
+        // حساب الجواهر
+        const gemsToReceive = Math.floor(coinsAmount / exchangeRate);
+        if (gemsToReceive < 1) {
+            return res.status(400).json({ error: `تحتاج ${exchangeRate} عملة على الأقل للحصول على جوهرة واحدة` });
+        }
+        
+        // التحقق من الرصيد
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (user.coins < coinsAmount) {
+            return res.status(400).json({ error: 'رصيدك غير كافٍ' });
+        }
+        
+        // تنفيذ التحويل
+        const updatedUser = await prisma.user.update({
+            where: { id: req.user.id },
+            data: {
+                coins: { decrement: coinsAmount },
+                gems: { increment: gemsToReceive }
+            }
+        });
+        
+        res.json({
+            success: true,
+            coinsSpent: coinsAmount,
+            gemsReceived: gemsToReceive,
+            newCoins: updatedUser.coins,
+            newGems: updatedUser.gems
+        });
+    } catch (error) {
+        console.error('Exchange error:', error);
+        res.status(500).json({ error: 'خطأ في التحويل' });
     }
 });
 

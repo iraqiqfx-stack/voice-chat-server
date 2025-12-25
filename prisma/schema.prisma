@@ -357,6 +357,9 @@ model Agent {
   name      String
   avatar    String?
   phone     String?
+  whatsapp  String?
+  telegram  String?
+  address   String?
   status    String            @default("offline") // online, offline, busy
   createdAt DateTime          @default(now())
   

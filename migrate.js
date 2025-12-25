@@ -34,6 +34,12 @@ async function migrate() {
         await client.query(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micDuration" INTEGER DEFAULT 30;`);
         console.log('✅ micDuration');
         
+        // إضافة حقول الوكلاء الجديدة
+        await client.query(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "whatsapp" TEXT;`);
+        await client.query(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "telegram" TEXT;`);
+        await client.query(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "address" TEXT;`);
+        console.log('✅ Agent fields (whatsapp, telegram, address)');
+        
         // إضافة عمود metadata لجدول ChatMessage
         await client.query(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "metadata" TEXT;`);
         console.log('✅ metadata');
