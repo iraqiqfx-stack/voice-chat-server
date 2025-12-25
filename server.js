@@ -4773,6 +4773,18 @@ app.get('/api/reels', authenticate, async (req, res) => {
         const skip = (page - 1) * limit;
         const userId = req.user.id;
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const MEDIA_SERVER_URL = process.env.MEDIA_SERVER_URL || 'http://62.84.176.222:3002';
+        
+        // دالة لتوليد HLS URL من video URL
+        const getHlsUrl = (videoUrl) => {
+            if (!videoUrl) return null;
+            // استخراج video ID من URL
+            const match = videoUrl.match(/\/videos\/([a-f0-9-]+)\.mp4/);
+            if (match) {
+                return `${MEDIA_SERVER_URL}/uploads/hls/${match[1]}/master.m3u8`;
+            }
+            return null;
+        };
         
         // جلب المتابَعين
         const following = await prisma.follow.findMany({
@@ -4828,6 +4840,7 @@ app.get('/api/reels', authenticate, async (req, res) => {
             const formattedReels = allReels.map(reel => ({
                 id: reel.id,
                 videoUrl: reel.videoUrl,
+                hlsUrl: getHlsUrl(reel.videoUrl),
                 thumbnailUrl: reel.thumbnailUrl,
                 caption: reel.caption,
                 duration: reel.duration,
@@ -4873,6 +4886,7 @@ app.get('/api/reels', authenticate, async (req, res) => {
         const formattedReels = paginated.map(reel => ({
             id: reel.id,
             videoUrl: reel.videoUrl,
+            hlsUrl: getHlsUrl(reel.videoUrl),
             thumbnailUrl: reel.thumbnailUrl,
             caption: reel.caption,
             duration: reel.duration,
@@ -5291,6 +5305,52 @@ app.post('/api/reels/test', authenticate, async (req, res) => {
         res.json({ success: true, reel });
     } catch (error) {
         console.error('Create test reel error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// إصلاح روابط الفيديو القديمة (تحويل localhost إلى VPS)
+app.post('/api/reels/fix-urls', authenticate, async (req, res) => {
+    try {
+        const MEDIA_SERVER_URL = process.env.MEDIA_SERVER_URL || 'http://62.84.176.222:3002';
+        
+        // جلب جميع الريلز التي تحتوي على localhost
+        const reelsToFix = await prisma.reel.findMany({
+            where: {
+                OR: [
+                    { videoUrl: { contains: 'localhost' } },
+                    { thumbnailUrl: { contains: 'localhost' } }
+                ]
+            }
+        });
+        
+        let fixedCount = 0;
+        for (const reel of reelsToFix) {
+            const updates = {};
+            if (reel.videoUrl && reel.videoUrl.includes('localhost')) {
+                updates.videoUrl = reel.videoUrl.replace(/http:\/\/localhost:\d+/, MEDIA_SERVER_URL);
+            }
+            if (reel.thumbnailUrl && reel.thumbnailUrl.includes('localhost')) {
+                updates.thumbnailUrl = reel.thumbnailUrl.replace(/http:\/\/localhost:\d+/, MEDIA_SERVER_URL);
+            }
+            
+            if (Object.keys(updates).length > 0) {
+                await prisma.reel.update({
+                    where: { id: reel.id },
+                    data: updates
+                });
+                fixedCount++;
+            }
+        }
+        
+        res.json({ 
+            success: true, 
+            message: `تم إصلاح ${fixedCount} ريل`,
+            totalFound: reelsToFix.length,
+            fixedCount
+        });
+    } catch (error) {
+        console.error('Fix reels URLs error:', error);
         res.status(500).json({ error: error.message });
     }
 });
