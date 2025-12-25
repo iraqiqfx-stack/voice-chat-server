@@ -1441,17 +1441,22 @@ app.get('/api/rooms', authenticate, async (req, res) => {
                 owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
                 _count: { select: { members: true, messages: true } }
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: [
+                { totalGiftPoints: 'desc' }, // الأكثر هدايا أولاً
+                { createdAt: 'desc' }
+            ],
             skip,
             take: limit
         });
         
+        // ترتيب إضافي حسب النشاط (رسائل + هدايا)
         const formattedRooms = rooms.map(room => ({
             ...room,
             membersCount: room._count.members,
             messagesCount: room._count.messages,
+            activityScore: room._count.messages + (room.totalGiftPoints * 10), // نقاط النشاط
             _count: undefined
-        }));
+        })).sort((a, b) => b.activityScore - a.activityScore);
         
         res.json(formattedRooms);
         
@@ -3021,6 +3026,80 @@ app.put('/api/rooms/:roomId/settings', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Update room settings error:', error);
         res.status(500).json({ error: 'خطأ في تحديث إعدادات الغرفة' });
+    }
+});
+
+// شراء مايكات للغرفة
+app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
+    try {
+        const { count } = req.body; // عدد المايكات المراد شراؤها
+        const micCount = parseInt(count) || 1;
+        
+        if (micCount < 1 || micCount > 10) {
+            return res.status(400).json({ error: 'عدد المايكات يجب أن يكون بين 1 و 10' });
+        }
+        
+        const room = await prisma.chatRoom.findUnique({ 
+            where: { id: req.params.roomId }
+        });
+        
+        if (!room) {
+            return res.status(404).json({ error: 'الغرفة غير موجودة' });
+        }
+        
+        if (room.ownerId !== req.user.id) {
+            return res.status(403).json({ error: 'فقط مالك الغرفة يمكنه شراء المايكات' });
+        }
+        
+        // الحد الأقصى للمايكات
+        const maxMics = 8;
+        if (room.micSeats + micCount > maxMics) {
+            return res.status(400).json({ error: `الحد الأقصى للمايكات هو ${maxMics}. لديك حالياً ${room.micSeats} مايك` });
+        }
+        
+        // جلب سعر المايك من الإعدادات
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        const micPrice = settings?.micSeatPrice || 100;
+        const totalPrice = micPrice * micCount;
+        
+        // التحقق من رصيد المستخدم
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (user.gems < totalPrice) {
+            return res.status(400).json({ error: `رصيدك غير كافٍ. تحتاج ${totalPrice} جوهرة` });
+        }
+        
+        // خصم الجواهر وإضافة المايكات
+        const [updatedUser, updatedRoom] = await prisma.$transaction([
+            prisma.user.update({
+                where: { id: req.user.id },
+                data: { gems: { decrement: totalPrice } }
+            }),
+            prisma.chatRoom.update({
+                where: { id: req.params.roomId },
+                data: { micSeats: { increment: micCount } }
+            })
+        ]);
+        
+        res.json({ 
+            success: true, 
+            message: `تم شراء ${micCount} مايك بنجاح`,
+            newMicSeats: updatedRoom.micSeats,
+            newGems: updatedUser.gems,
+            totalPaid: totalPrice
+        });
+    } catch (error) {
+        console.error('Buy mics error:', error);
+        res.status(500).json({ error: 'خطأ في شراء المايكات' });
+    }
+});
+
+// جلب سعر المايك
+app.get('/api/settings/mic-price', authenticate, async (req, res) => {
+    try {
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        res.json({ micSeatPrice: settings?.micSeatPrice || 100 });
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب السعر' });
     }
 });
 

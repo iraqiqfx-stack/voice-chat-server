@@ -195,6 +195,7 @@ model ChatRoom {
   totalGiftPoints Float           @default(0)  // مجموع نقاط الهدايا (1 جوهرة = 1 نقطة)
   isPublic        Boolean         @default(true)
   maxMembers      Int             @default(500)
+  micSeats        Int             @default(0)  // عدد المايكات المشتراة (0 = بدون مايكات)
   
   // إعدادات الغرفة
   messagePrice    Float           @default(0)  // سعر الرسالة بالجواهر (0 = مجاني)
@@ -397,6 +398,7 @@ model AppSettings {
   roomCreationPrice Float   @default(500)
   minWithdraw       Float   @default(100)
   maxWithdraw       Float   @default(10000)
+  micSeatPrice      Float   @default(100) // سعر المايك الواحد بالجواهر
 }
 
 // =================== الباقات ===================
