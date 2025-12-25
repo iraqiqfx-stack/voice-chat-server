@@ -35,13 +35,33 @@ async function runMigrations() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "Comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "reel_comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "micSeats" INTEGER DEFAULT 0;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "micExpiresAt" TIMESTAMP;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micSeatPrice" DOUBLE PRECISION DEFAULT 100;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micDuration" INTEGER DEFAULT 30;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
     }
 }
 runMigrations();
+
+// دالة للتحقق من صلاحية المايكات
+function isMicValid(room) {
+    if (!room.micSeats || room.micSeats === 0) return false;
+    if (!room.micExpiresAt) return false;
+    return new Date(room.micExpiresAt) > new Date();
+}
+
+// دالة لتنسيق بيانات الغرفة مع إخفاء المايكات المنتهية
+function formatRoomWithMicCheck(room) {
+    const micValid = isMicValid(room);
+    return {
+        ...room,
+        micSeats: micValid ? room.micSeats : 0,
+        micExpiresAt: micValid ? room.micExpiresAt : null,
+        micActive: micValid
+    };
+}
 
 // Voice Server URL
 const VOICE_SERVER_URL = 'http://62.84.176.222:3001';
@@ -1452,12 +1472,15 @@ app.get('/api/rooms', authenticate, async (req, res) => {
             take: limit
         });
         
-        const formattedRooms = rooms.map(room => ({
-            ...room,
-            membersCount: room._count.members,
-            messagesCount: room._count.messages,
-            _count: undefined
-        }));
+        const formattedRooms = rooms.map(room => {
+            const formatted = formatRoomWithMicCheck(room);
+            return {
+                ...formatted,
+                membersCount: room._count.members,
+                messagesCount: room._count.messages,
+                _count: undefined
+            };
+        });
         
         res.json(formattedRooms);
         
@@ -3031,16 +3054,9 @@ app.put('/api/rooms/:roomId/settings', authenticate, async (req, res) => {
     }
 });
 
-// شراء مايكات للغرفة
+// شراء مايكات للغرفة (4 مايكات دفعة واحدة مع مدة صلاحية)
 app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
     try {
-        const { count } = req.body; // عدد المايكات المراد شراؤها
-        const micCount = parseInt(count) || 1;
-        
-        if (micCount < 1 || micCount > 10) {
-            return res.status(400).json({ error: 'عدد المايكات يجب أن يكون بين 1 و 10' });
-        }
-        
         const room = await prisma.chatRoom.findUnique({ 
             where: { id: req.params.roomId }
         });
@@ -3053,41 +3069,43 @@ app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'فقط مالك الغرفة يمكنه شراء المايكات' });
         }
         
-        // الحد الأقصى للمايكات
-        const maxMics = 8;
-        if (room.micSeats + micCount > maxMics) {
-            return res.status(400).json({ error: `الحد الأقصى للمايكات هو ${maxMics}. لديك حالياً ${room.micSeats} مايك` });
-        }
-        
-        // جلب سعر المايك من الإعدادات
+        // جلب الإعدادات (السعر والمدة)
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
         const micPrice = settings?.micSeatPrice || 100;
-        const totalPrice = micPrice * micCount;
+        const micDuration = settings?.micDuration || 30; // بالأيام
         
         // التحقق من رصيد المستخدم
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-        if (user.gems < totalPrice) {
-            return res.status(400).json({ error: `رصيدك غير كافٍ. تحتاج ${totalPrice} جوهرة` });
+        if (user.gems < micPrice) {
+            return res.status(400).json({ error: `رصيدك غير كافٍ. تحتاج ${micPrice} جوهرة` });
         }
         
-        // خصم الجواهر وإضافة المايكات
+        // حساب تاريخ انتهاء الصلاحية
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + micDuration);
+        
+        // خصم الجواهر وتفعيل 4 مايكات
         const [updatedUser, updatedRoom] = await prisma.$transaction([
             prisma.user.update({
                 where: { id: req.user.id },
-                data: { gems: { decrement: totalPrice } }
+                data: { gems: { decrement: micPrice } }
             }),
             prisma.chatRoom.update({
                 where: { id: req.params.roomId },
-                data: { micSeats: { increment: micCount } }
+                data: { 
+                    micSeats: 4,
+                    micExpiresAt: expiresAt
+                }
             })
         ]);
         
         res.json({ 
             success: true, 
-            message: `تم شراء ${micCount} مايك بنجاح`,
-            newMicSeats: updatedRoom.micSeats,
+            message: `تم شراء 4 مايكات لمدة ${micDuration} يوم`,
+            micSeats: 4,
+            micExpiresAt: expiresAt,
             newGems: updatedUser.gems,
-            totalPaid: totalPrice
+            totalPaid: micPrice
         });
     } catch (error) {
         console.error('Buy mics error:', error);
@@ -3095,11 +3113,14 @@ app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
     }
 });
 
-// جلب سعر المايك
+// جلب سعر ومدة المايكات
 app.get('/api/settings/mic-price', authenticate, async (req, res) => {
     try {
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
-        res.json({ micSeatPrice: settings?.micSeatPrice || 100 });
+        res.json({ 
+            micSeatPrice: settings?.micSeatPrice || 100,
+            micDuration: settings?.micDuration || 30
+        });
     } catch (error) {
         res.status(500).json({ error: 'خطأ في جلب السعر' });
     }
@@ -3820,6 +3841,20 @@ app.get('/api/rooms/:roomId/voice/seats', authenticate, async (req, res) => {
     try {
         const { roomId } = req.params;
         
+        // التحقق من صلاحية المايكات أولاً
+        const room = await prisma.chatRoom.findUnique({
+            where: { id: roomId }
+        });
+        
+        if (!room) {
+            return res.status(404).json({ error: 'الغرفة غير موجودة' });
+        }
+        
+        // إذا المايكات غير مفعلة أو منتهية، إرجاع مصفوفة فارغة
+        if (!isMicValid(room)) {
+            return res.json([]);
+        }
+        
         // جلب المقاعد من قاعدة البيانات
         let seats = await prisma.voiceSeat.findMany({
             where: { roomId },
@@ -3878,7 +3913,21 @@ app.post('/api/rooms/:roomId/voice/join/:seatNumber', authenticate, async (req, 
         const userId = req.user.id;
         const seatNum = parseInt(seatNumber);
         
-        // التحقق من الحظر أولاً
+        // التحقق من صلاحية المايكات أولاً
+        const room = await prisma.chatRoom.findUnique({
+            where: { id: roomId }
+        });
+        
+        if (!room) {
+            return res.status(404).json({ error: 'الغرفة غير موجودة' });
+        }
+        
+        // التحقق من أن المايكات مفعلة وغير منتهية الصلاحية
+        if (!isMicValid(room)) {
+            return res.status(403).json({ error: 'المايكات غير مفعلة أو منتهية الصلاحية', micExpired: true });
+        }
+        
+        // التحقق من الحظر
         const member = await prisma.roomMember.findUnique({
             where: { roomId_userId: { roomId, userId } }
         });
