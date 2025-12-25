@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY prisma ./prisma/
 
-RUN npm install --ignore-scripts
+RUN npm install
 
 RUN npx prisma generate
 
@@ -17,4 +17,5 @@ RUN chmod +x start.sh
 
 EXPOSE 3000
 
+# Force rebuild: v2
 CMD ["./start.sh"]
