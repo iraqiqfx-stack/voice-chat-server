@@ -1436,31 +1436,31 @@ app.get('/api/rooms', authenticate, async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const skip = (page - 1) * limit;
         
+        // جلب الغرف مع عدد الرسائل للترتيب
         const rooms = await prisma.chatRoom.findMany({
             include: {
                 owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
                 _count: { select: { members: true, messages: true } }
             },
             orderBy: [
-                { totalGiftPoints: 'desc' }, // الأكثر هدايا أولاً
+                { totalGiftPoints: 'desc' },
                 { createdAt: 'desc' }
             ],
             skip,
             take: limit
         });
         
-        // ترتيب إضافي حسب النشاط (رسائل + هدايا)
         const formattedRooms = rooms.map(room => ({
             ...room,
             membersCount: room._count.members,
             messagesCount: room._count.messages,
-            activityScore: room._count.messages + (room.totalGiftPoints * 10), // نقاط النشاط
             _count: undefined
-        })).sort((a, b) => b.activityScore - a.activityScore);
+        }));
         
         res.json(formattedRooms);
         
     } catch (error) {
+        console.error('Get rooms error:', error);
         res.status(500).json({ error: 'خطأ في جلب الغرف' });
     }
 });
