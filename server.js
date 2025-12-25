@@ -2882,12 +2882,14 @@ app.post('/api/exchange/coins-to-gems', authenticate, async (req, res) => {
 // جلب طرق السحب المتاحة
 app.get('/api/payment-methods', authenticate, async (req, res) => {
     try {
-        const methods = await prisma.paymentMethod.findMany({
-            where: { isActive: true },
-            orderBy: { createdAt: 'asc' }
-        });
+        const methods = await prisma.$queryRaw`
+            SELECT * FROM "PaymentMethod" 
+            WHERE "isActive" = true 
+            ORDER BY "createdAt" ASC
+        `;
         res.json(methods);
     } catch (error) {
+        console.error('Payment methods error:', error);
         res.status(500).json({ error: 'خطأ في جلب طرق السحب' });
     }
 });
@@ -2901,10 +2903,11 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'يرجى اختيار طريقة السحب وإدخال رقم الحساب' });
         }
         
-        // جلب طريقة السحب
-        const paymentMethod = await prisma.paymentMethod.findUnique({
-            where: { id: paymentMethodId }
-        });
+        // جلب طريقة السحب باستخدام SQL
+        const methods = await prisma.$queryRaw`
+            SELECT * FROM "PaymentMethod" WHERE "id" = ${paymentMethodId}
+        `;
+        const paymentMethod = methods[0];
         
         if (!paymentMethod || !paymentMethod.isActive) {
             return res.status(400).json({ error: 'طريقة السحب غير متاحة' });
@@ -2932,20 +2935,18 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
         const fee = Math.floor(amount * (paymentMethod.fee / 100));
         const netAmount = amount - fee;
         
-        const [_, withdraw] = await prisma.$transaction([
-            prisma.user.update({
-                where: { id: req.user.id },
-                data: { coins: { decrement: amount } }
-            }),
-            prisma.withdrawRequest.create({
-                data: {
-                    userId: req.user.id,
-                    amount: netAmount,
-                    paymentMethodId,
-                    accountNumber
-                }
-            })
-        ]);
+        // خصم الرصيد
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { coins: { decrement: amount } }
+        });
+        
+        // إنشاء طلب السحب باستخدام SQL
+        const withdrawId = require('crypto').randomUUID();
+        await prisma.$executeRaw`
+            INSERT INTO "WithdrawRequest" ("id", "userId", "amount", "status", "paymentMethodId", "accountNumber", "createdAt")
+            VALUES (${withdrawId}, ${req.user.id}, ${netAmount}, 'pending', ${paymentMethodId}, ${accountNumber}, NOW())
+        `;
         
         // إشعار طلب السحب
         await createNotification(
@@ -2953,13 +2954,15 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
             'finance',
             '💸 تم إرسال طلب السحب',
             `طلب سحب ${netAmount} عملة عبر ${paymentMethod.name} قيد المراجعة`,
-            { withdrawId: withdraw.id, amount: netAmount, status: 'pending' }
+            { withdrawId, amount: netAmount, status: 'pending' }
         );
         
         res.json({ 
-            ...withdraw, 
+            id: withdrawId,
+            amount: netAmount,
             fee,
-            paymentMethod 
+            paymentMethod,
+            status: 'pending'
         });
         
     } catch (error) {
@@ -6810,9 +6813,10 @@ app.delete('/api/admin/agents/:id', authenticate, async (req, res) => {
 // جلب طرق السحب
 app.get('/api/admin/payment-methods', authenticate, async (req, res) => {
     try {
-        const methods = await prisma.paymentMethod.findMany({ orderBy: { createdAt: 'asc' } });
+        const methods = await prisma.$queryRaw`SELECT * FROM "PaymentMethod" ORDER BY "createdAt" ASC`;
         res.json(methods);
     } catch (error) {
+        console.error('Get payment methods error:', error);
         res.status(500).json({ error: 'خطأ في جلب طرق السحب' });
     }
 });
@@ -6820,9 +6824,16 @@ app.get('/api/admin/payment-methods', authenticate, async (req, res) => {
 // إضافة طريقة سحب
 app.post('/api/admin/payment-methods', authenticate, async (req, res) => {
     try {
-        const method = await prisma.paymentMethod.create({ data: req.body });
-        res.json(method);
+        const { name, icon, minAmount, maxAmount, fee, isActive } = req.body;
+        const id = require('crypto').randomUUID();
+        await prisma.$executeRaw`
+            INSERT INTO "PaymentMethod" ("id", "name", "icon", "minAmount", "maxAmount", "fee", "isActive", "createdAt")
+            VALUES (${id}, ${name}, ${icon || null}, ${minAmount || 100}, ${maxAmount || 10000}, ${fee || 0}, ${isActive !== false}, NOW())
+        `;
+        const methods = await prisma.$queryRaw`SELECT * FROM "PaymentMethod" WHERE "id" = ${id}`;
+        res.json(methods[0]);
     } catch (error) {
+        console.error('Create payment method error:', error);
         res.status(500).json({ error: 'خطأ في إضافة طريقة السحب' });
     }
 });
@@ -6830,12 +6841,17 @@ app.post('/api/admin/payment-methods', authenticate, async (req, res) => {
 // تحديث طريقة سحب
 app.put('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
     try {
-        const method = await prisma.paymentMethod.update({ 
-            where: { id: req.params.id }, 
-            data: req.body 
-        });
-        res.json(method);
+        const { name, icon, minAmount, maxAmount, fee, isActive } = req.body;
+        await prisma.$executeRaw`
+            UPDATE "PaymentMethod" 
+            SET "name" = ${name}, "icon" = ${icon || null}, "minAmount" = ${minAmount || 100}, 
+                "maxAmount" = ${maxAmount || 10000}, "fee" = ${fee || 0}, "isActive" = ${isActive !== false}
+            WHERE "id" = ${req.params.id}
+        `;
+        const methods = await prisma.$queryRaw`SELECT * FROM "PaymentMethod" WHERE "id" = ${req.params.id}`;
+        res.json(methods[0]);
     } catch (error) {
+        console.error('Update payment method error:', error);
         res.status(500).json({ error: 'خطأ في تحديث طريقة السحب' });
     }
 });
@@ -6843,9 +6859,10 @@ app.put('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
 // حذف طريقة سحب
 app.delete('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
     try {
-        await prisma.paymentMethod.delete({ where: { id: req.params.id } });
+        await prisma.$executeRaw`DELETE FROM "PaymentMethod" WHERE "id" = ${req.params.id}`;
         res.json({ success: true });
     } catch (error) {
+        console.error('Delete payment method error:', error);
         res.status(500).json({ error: 'خطأ في حذف طريقة السحب' });
     }
 });
