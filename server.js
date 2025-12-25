@@ -34,6 +34,8 @@ async function runMigrations() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "Comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "reel_comment" ADD COLUMN IF NOT EXISTS "parentId" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "micSeats" INTEGER DEFAULT 0;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micSeatPrice" DOUBLE PRECISION DEFAULT 100;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
