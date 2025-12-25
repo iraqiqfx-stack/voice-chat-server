@@ -1454,6 +1454,62 @@ app.get('/api/rooms', authenticate, async (req, res) => {
     }
 });
 
+// غرفي (الغرف التي أملكها)
+app.get('/api/rooms/my', authenticate, async (req, res) => {
+    try {
+        const rooms = await prisma.chatRoom.findMany({
+            where: { ownerId: req.user.id },
+            include: {
+                owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
+                _count: { select: { members: true, messages: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        
+        const formattedRooms = rooms.map(room => ({
+            ...room,
+            membersCount: room._count.members,
+            messagesCount: room._count.messages,
+            _count: undefined
+        }));
+        
+        res.json(formattedRooms);
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب غرفي' });
+    }
+});
+
+// الغرف المنضم إليها
+app.get('/api/rooms/joined', authenticate, async (req, res) => {
+    try {
+        const memberships = await prisma.roomMember.findMany({
+            where: { 
+                userId: req.user.id,
+                room: { ownerId: { not: req.user.id } } // استثناء الغرف التي أملكها
+            },
+            include: {
+                room: {
+                    include: {
+                        owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
+                        _count: { select: { members: true, messages: true } }
+                    }
+                }
+            }
+        });
+        
+        const formattedRooms = memberships.map(m => ({
+            ...m.room,
+            membersCount: m.room._count.members,
+            messagesCount: m.room._count.messages,
+            _count: undefined
+        }));
+        
+        res.json(formattedRooms);
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب الغرف المنضم إليها' });
+    }
+});
+
 app.get('/api/rooms/:roomId', authenticate, async (req, res) => {
     try {
         const room = await prisma.chatRoom.findUnique({
