@@ -1499,8 +1499,13 @@ app.post('/api/rooms', authenticate, async (req, res) => {
         
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
         
-        // التحقق من الرصيد
-        if (req.user.coins < settings.roomCreationPrice) {
+        // جلب الرصيد الحالي من قاعدة البيانات (وليس من التوكن)
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { coins: true }
+        });
+        
+        if (!currentUser || currentUser.coins < settings.roomCreationPrice) {
             return res.status(400).json({ error: 'رصيدك غير كافٍ لإنشاء غرفة' });
         }
         
@@ -2361,8 +2366,13 @@ app.post('/api/gifts/send', authenticate, async (req, res) => {
         // حساب السعر الإجمالي
         const totalPrice = gift.price * giftQuantity;
         
-        // التحقق من رصيد المجوهرات
-        if (req.user.gems < totalPrice) {
+        // جلب الرصيد الحالي من قاعدة البيانات (وليس من التوكن)
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { gems: true }
+        });
+        
+        if (!currentUser || currentUser.gems < totalPrice) {
             return res.status(400).json({ error: 'رصيد المجوهرات غير كافٍ' });
         }
         
@@ -2607,7 +2617,13 @@ app.post('/api/wheel/spin', authenticate, async (req, res) => {
             });
         }
         
-        if (req.user.gems < settings.spinPrice) {
+        // جلب الرصيد الحالي من قاعدة البيانات (وليس من التوكن)
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { gems: true }
+        });
+        
+        if (!currentUser || currentUser.gems < settings.spinPrice) {
             return res.status(400).json({ error: `جواهرك غير كافية. تحتاج ${settings.spinPrice} جوهرة` });
         }
         
@@ -2694,7 +2710,13 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
             return res.status(400).json({ error: `المبلغ يجب أن يكون بين ${settings.minWithdraw} و ${settings.maxWithdraw}` });
         }
         
-        if (req.user.coins < amount) {
+        // جلب الرصيد الحالي من قاعدة البيانات
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { coins: true }
+        });
+        
+        if (!currentUser || currentUser.coins < amount) {
             return res.status(400).json({ error: 'رصيدك غير كافٍ' });
         }
         
@@ -2824,7 +2846,13 @@ app.post('/api/packages/buy', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'هذه الباقة غير متاحة حالياً' });
         }
         
-        if (req.user.coins < pkg.price) {
+        // جلب الرصيد الحالي من قاعدة البيانات (وليس من التوكن)
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { coins: true }
+        });
+        
+        if (!currentUser || currentUser.coins < pkg.price) {
             return res.status(400).json({ error: 'عملاتك غير كافية' });
         }
         
@@ -3394,8 +3422,13 @@ app.post('/api/games/create', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'يوجد لعبة نشطة بالفعل، انتظر حتى تنتهي' });
         }
         
-        // التحقق من الرصيد
-        if (req.user.gems < betAmount) {
+        // جلب الرصيد الحالي من قاعدة البيانات
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { gems: true }
+        });
+        
+        if (!currentUser || currentUser.gems < betAmount) {
             return res.status(400).json({ error: 'رصيد غير كافٍ' });
         }
 
@@ -3465,8 +3498,13 @@ app.post('/api/games/:gameId/join', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'أنت مشترك بالفعل' });
         }
 
-        // التحقق من الرصيد
-        if (req.user.gems < game.betAmount) {
+        // جلب الرصيد الحالي من قاعدة البيانات
+        const currentUser = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { gems: true }
+        });
+        
+        if (!currentUser || currentUser.gems < game.betAmount) {
             return res.status(400).json({ error: 'رصيد غير كافٍ' });
         }
 
