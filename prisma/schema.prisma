@@ -306,8 +306,10 @@ model Gift {
   nameAr          String
   price           Float
   image           String   // مسار الصورة أو الرمز التعبيري
-  imageUrl        String?  // رابط الصورة المتحركة (GIF)
-  animation       String   // نوع الأنيميشن
+  imageUrl        String?  // رابط صورة الأيقونة (مضغوطة)
+  videoUrl        String?  // رابط فيديو الهدية (للمتوسطة والمميزة)
+  animation       String   // نوع الأنيميشن (deprecated - للتوافق)
+  giftType        String   @default("basic") // basic, medium, premium
   animationDuration Int    @default(4)
   color           String
   rarity          String   @default("common") // common, rare, epic, legendary
