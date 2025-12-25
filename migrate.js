@@ -48,6 +48,26 @@ async function migrate() {
         await client.query(`ALTER TABLE "ChatMessage" ADD COLUMN IF NOT EXISTS "replyToId" TEXT;`);
         console.log('✅ replyToId');
         
+        // إنشاء جدول PaymentMethod إذا لم يكن موجوداً
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "PaymentMethod" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "name" TEXT NOT NULL,
+                "icon" TEXT,
+                "minAmount" DOUBLE PRECISION DEFAULT 100,
+                "maxAmount" DOUBLE PRECISION DEFAULT 10000,
+                "fee" DOUBLE PRECISION DEFAULT 0,
+                "isActive" BOOLEAN DEFAULT true,
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        console.log('✅ PaymentMethod table');
+        
+        // إضافة أعمدة السحب الجديدة
+        await client.query(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "paymentMethodId" TEXT;`);
+        await client.query(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "accountNumber" TEXT;`);
+        console.log('✅ WithdrawRequest fields (paymentMethodId, accountNumber)');
+        
         console.log('✅ تم تحديث قاعدة البيانات بنجاح!');
     } catch (error) {
         console.error('❌ خطأ في تحديث قاعدة البيانات:', error.message);
