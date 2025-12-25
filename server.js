@@ -1,4 +1,4 @@
-import express from 'express';
+hgimport express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -1432,12 +1432,18 @@ app.get('/api/notifications/unread-count', authenticate, async (req, res) => {
 
 app.get('/api/rooms', authenticate, async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        
         const rooms = await prisma.chatRoom.findMany({
             include: {
                 owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
                 _count: { select: { members: true, messages: true } }
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
         });
         
         const formattedRooms = rooms.map(room => ({
@@ -1457,13 +1463,19 @@ app.get('/api/rooms', authenticate, async (req, res) => {
 // غرفي (الغرف التي أملكها)
 app.get('/api/rooms/my', authenticate, async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        
         const rooms = await prisma.chatRoom.findMany({
             where: { ownerId: req.user.id },
             include: {
                 owner: { select: { id: true, username: true, avatar: true, level: true, experience: true } },
                 _count: { select: { members: true, messages: true } }
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            skip,
+            take: limit
         });
         
         const formattedRooms = rooms.map(room => ({
@@ -1482,6 +1494,10 @@ app.get('/api/rooms/my', authenticate, async (req, res) => {
 // الغرف المنضم إليها
 app.get('/api/rooms/joined', authenticate, async (req, res) => {
     try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = (page - 1) * limit;
+        
         const memberships = await prisma.roomMember.findMany({
             where: { 
                 userId: req.user.id,
@@ -1494,7 +1510,9 @@ app.get('/api/rooms/joined', authenticate, async (req, res) => {
                         _count: { select: { members: true, messages: true } }
                     }
                 }
-            }
+            },
+            skip,
+            take: limit
         });
         
         const formattedRooms = memberships.map(m => ({
