@@ -3054,7 +3054,7 @@ app.put('/api/rooms/:roomId/settings', authenticate, async (req, res) => {
     }
 });
 
-// شراء مايكات للغرفة (4 مايكات دفعة واحدة مع مدة صلاحية)
+// شراء مايكات للغرفة (4 مايكات دفعة واحدة مع مدة صلاحية) - بالعملات
 app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
     try {
         const room = await prisma.chatRoom.findUnique({ 
@@ -3074,21 +3074,25 @@ app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
         const micPrice = settings?.micSeatPrice || 100;
         const micDuration = settings?.micDuration || 30; // بالأيام
         
-        // التحقق من رصيد المستخدم
+        // التحقق من رصيد العملات
         const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-        if (user.gems < micPrice) {
-            return res.status(400).json({ error: `رصيدك غير كافٍ. تحتاج ${micPrice} جوهرة` });
+        if (user.coins < micPrice) {
+            return res.status(400).json({ error: `رصيدك غير كافٍ. تحتاج ${micPrice} عملة` });
         }
         
         // حساب تاريخ انتهاء الصلاحية
-        const expiresAt = new Date();
+        let expiresAt = new Date();
+        // إذا كان لديه مايكات سارية، نمدد من تاريخ الانتهاء الحالي
+        if (room.micExpiresAt && new Date(room.micExpiresAt) > new Date()) {
+            expiresAt = new Date(room.micExpiresAt);
+        }
         expiresAt.setDate(expiresAt.getDate() + micDuration);
         
-        // خصم الجواهر وتفعيل 4 مايكات
+        // خصم العملات وتفعيل 4 مايكات
         const [updatedUser, updatedRoom] = await prisma.$transaction([
             prisma.user.update({
                 where: { id: req.user.id },
-                data: { gems: { decrement: micPrice } }
+                data: { coins: { decrement: micPrice } }
             }),
             prisma.chatRoom.update({
                 where: { id: req.params.roomId },
@@ -3104,7 +3108,7 @@ app.post('/api/rooms/:roomId/buy-mics', authenticate, async (req, res) => {
             message: `تم شراء 4 مايكات لمدة ${micDuration} يوم`,
             micSeats: 4,
             micExpiresAt: expiresAt,
-            newGems: updatedUser.gems,
+            newCoins: updatedUser.coins,
             totalPaid: micPrice
         });
     } catch (error) {
