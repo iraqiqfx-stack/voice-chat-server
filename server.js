@@ -4775,10 +4775,16 @@ app.get('/api/reels', authenticate, async (req, res) => {
         const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
         const MEDIA_SERVER_URL = process.env.MEDIA_SERVER_URL || 'http://62.84.176.222:3002';
         
+        // دالة لتوليد WebM URL من video URL (للتوافق مع MediaTek)
+        const getWebmUrl = (videoUrl) => {
+            if (!videoUrl) return null;
+            // استبدال .mp4 بـ .webm
+            return videoUrl.replace('.mp4', '.webm');
+        };
+        
         // دالة لتوليد HLS URL من video URL
         const getHlsUrl = (videoUrl) => {
             if (!videoUrl) return null;
-            // استخراج video ID من URL
             const match = videoUrl.match(/\/videos\/([a-f0-9-]+)\.mp4/);
             if (match) {
                 return `${MEDIA_SERVER_URL}/uploads/hls/${match[1]}/master.m3u8`;
@@ -4840,6 +4846,7 @@ app.get('/api/reels', authenticate, async (req, res) => {
             const formattedReels = allReels.map(reel => ({
                 id: reel.id,
                 videoUrl: reel.videoUrl,
+                webmUrl: getWebmUrl(reel.videoUrl),
                 hlsUrl: getHlsUrl(reel.videoUrl),
                 thumbnailUrl: reel.thumbnailUrl,
                 caption: reel.caption,
@@ -4886,6 +4893,7 @@ app.get('/api/reels', authenticate, async (req, res) => {
         const formattedReels = paginated.map(reel => ({
             id: reel.id,
             videoUrl: reel.videoUrl,
+            webmUrl: getWebmUrl(reel.videoUrl),
             hlsUrl: getHlsUrl(reel.videoUrl),
             thumbnailUrl: reel.thumbnailUrl,
             caption: reel.caption,
