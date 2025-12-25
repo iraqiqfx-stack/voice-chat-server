@@ -17,5 +17,5 @@ RUN chmod +x start.sh
 
 EXPOSE 3000
 
-# Force rebuild: v2
-CMD ["./start.sh"]
+# Force rebuild: v3 - 2025-12-25
+CMD ["sh", "-c", "node migrate.js && npx prisma db push --accept-data-loss && node server.js"]
