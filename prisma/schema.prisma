@@ -370,6 +370,7 @@ model WheelPrize {
   color       String
   probability Float         @default(10) // نسبة الفوز %
   isActive    Boolean       @default(true)
+  isWinnable  Boolean       @default(true) // هل يمكن الفوز بها أم للعرض فقط
   
   spinHistory SpinHistory[]
 }

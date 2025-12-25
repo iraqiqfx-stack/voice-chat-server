@@ -2613,18 +2613,24 @@ app.post('/api/wheel/spin', authenticate, async (req, res) => {
         
         let prizes = await prisma.wheelPrize.findMany({ where: { isActive: true } });
         
-        if (prizes.length === 0) {
+        // فصل الجوائز القابلة للفوز عن جوائز العرض فقط
+        const winnablePrizes = prizes.filter(p => p.isWinnable !== false);
+        
+        if (winnablePrizes.length === 0) {
             return res.status(400).json({ error: 'لا توجد جوائز متاحة حالياً' });
         }
         
-        // اختيار الجائزة بناءً على الاحتمالية
-        const totalProbability = prizes.reduce((sum, p) => sum + p.probability, 0);
-        let random = Math.random() * totalProbability;
-        let selectedPrize = prizes[0];
+        // اختيار الجائزة بناءً على الاحتمالية (النسبة المئوية الحقيقية)
+        // نرتب الجوائز من الأقل احتمالية للأعلى لضمان الدقة
+        const sortedPrizes = [...winnablePrizes].sort((a, b) => a.probability - b.probability);
+        const random = Math.random() * 100; // رقم عشوائي من 0 إلى 100
         
-        for (const prize of prizes) {
-            random -= prize.probability;
-            if (random <= 0) {
+        let cumulativeProbability = 0;
+        let selectedPrize = sortedPrizes[sortedPrizes.length - 1]; // الافتراضي: الأعلى احتمالية
+        
+        for (const prize of sortedPrizes) {
+            cumulativeProbability += prize.probability;
+            if (random <= cumulativeProbability) {
                 selectedPrize = prize;
                 break;
             }
@@ -6468,9 +6474,17 @@ app.get('/api/admin/wheel-prizes', authenticate, async (req, res) => {
 // إضافة جائزة
 app.post('/api/admin/wheel-prizes', authenticate, async (req, res) => {
     try {
-        const { name, value, type, color, probability, isActive } = req.body;
+        const { name, value, type, color, probability, isActive, isWinnable } = req.body;
         const prize = await prisma.wheelPrize.create({
-            data: { name, value, type, color, probability: probability || 10, isActive: isActive !== false }
+            data: { 
+                name, 
+                value, 
+                type, 
+                color, 
+                probability: probability || 10, 
+                isActive: isActive !== false,
+                isWinnable: isWinnable !== false
+            }
         });
         res.json(prize);
     } catch (error) {
