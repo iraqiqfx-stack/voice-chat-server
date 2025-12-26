@@ -6594,7 +6594,19 @@ app.get('/api/admin/users', authenticate, async (req, res) => {
         const [users, total] = await Promise.all([
             prisma.user.findMany({
                 where,
-                select: { id: true, username: true, email: true, avatar: true, coins: true, gems: true, level: true, createdAt: true },
+                select: { 
+                    id: true, username: true, email: true, avatar: true, 
+                    coins: true, gems: true, level: true, isBanned: true, createdAt: true,
+                    userPackages: {
+                        where: { 
+                            isActive: true,
+                            expiresAt: { gt: new Date() }
+                        },
+                        include: {
+                            package: { select: { id: true, name: true, nameAr: true, icon: true, color: true } }
+                        }
+                    }
+                },
                 orderBy: { createdAt: 'desc' },
                 skip: (page - 1) * limit,
                 take: limit
@@ -6602,8 +6614,23 @@ app.get('/api/admin/users', authenticate, async (req, res) => {
             prisma.user.count({ where })
         ]);
         
-        res.json({ users, total, page, pages: Math.ceil(total / limit) });
+        // تنسيق البيانات
+        const formattedUsers = users.map(user => ({
+            ...user,
+            activePackages: user.userPackages.map(up => ({
+                id: up.package.id,
+                name: up.package.name,
+                nameAr: up.package.nameAr,
+                icon: up.package.icon,
+                color: up.package.color,
+                expiresAt: up.expiresAt
+            })),
+            userPackages: undefined
+        }));
+        
+        res.json({ users: formattedUsers, total, page, pages: Math.ceil(total / limit) });
     } catch (error) {
+        console.error('Get users error:', error);
         res.status(500).json({ error: 'خطأ في جلب المستخدمين' });
     }
 });
