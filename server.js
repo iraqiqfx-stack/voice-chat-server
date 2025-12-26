@@ -7745,13 +7745,23 @@ app.get('/api/legal/:slug', async (req, res) => {
 // صفحة ويب لسياسة الخصوصية (لـ Google Play)
 app.get('/privacy-policy', async (req, res) => {
     try {
-        const page = await prisma.$queryRaw`
-            SELECT * FROM "LegalPage" WHERE "slug" = 'privacy-policy'
-        `;
+        let content = 'سياسة الخصوصية غير متوفرة حالياً';
+        let title = 'سياسة الخصوصية';
+        let updatedAt = '';
         
-        const content = page && page.length > 0 ? page[0].content : 'سياسة الخصوصية غير متوفرة';
-        const title = page && page.length > 0 ? page[0].title : 'سياسة الخصوصية';
-        const updatedAt = page && page.length > 0 ? new Date(page[0].updatedAt).toLocaleDateString('ar-EG') : '';
+        try {
+            const page = await prisma.$queryRaw`
+                SELECT * FROM "LegalPage" WHERE "slug" = 'privacy-policy'
+            `;
+            
+            if (page && page.length > 0) {
+                content = page[0].content;
+                title = page[0].title;
+                updatedAt = new Date(page[0].updatedAt).toLocaleDateString('ar-EG');
+            }
+        } catch (dbError) {
+            console.log('LegalPage table not found, using defaults');
+        }
         
         res.send(`
 <!DOCTYPE html>
@@ -7839,13 +7849,23 @@ app.get('/privacy-policy', async (req, res) => {
 // صفحة ويب لشروط الاستخدام (لـ Google Play)
 app.get('/terms', async (req, res) => {
     try {
-        const page = await prisma.$queryRaw`
-            SELECT * FROM "LegalPage" WHERE "slug" = 'terms'
-        `;
+        let content = 'شروط الاستخدام غير متوفرة حالياً';
+        let title = 'شروط الاستخدام';
+        let updatedAt = '';
         
-        const content = page && page.length > 0 ? page[0].content : 'شروط الاستخدام غير متوفرة';
-        const title = page && page.length > 0 ? page[0].title : 'شروط الاستخدام';
-        const updatedAt = page && page.length > 0 ? new Date(page[0].updatedAt).toLocaleDateString('ar-EG') : '';
+        try {
+            const page = await prisma.$queryRaw`
+                SELECT * FROM "LegalPage" WHERE "slug" = 'terms'
+            `;
+            
+            if (page && page.length > 0) {
+                content = page[0].content;
+                title = page[0].title;
+                updatedAt = new Date(page[0].updatedAt).toLocaleDateString('ar-EG');
+            }
+        } catch (dbError) {
+            console.log('LegalPage table not found, using defaults');
+        }
         
         res.send(`
 <!DOCTYPE html>
@@ -7969,6 +7989,70 @@ app.put('/api/admin/legal-pages/:slug', authenticate, async (req, res) => {
 // ============================================================
 // 🚀 تشغيل السيرفر
 // ============================================================
+
+// إنشاء جدول الصفحات القانونية إذا لم يكن موجوداً
+async function initLegalPages() {
+    try {
+        // إنشاء الجدول
+        await prisma.$executeRaw`
+            CREATE TABLE IF NOT EXISTS "LegalPage" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "slug" TEXT NOT NULL UNIQUE,
+                "title" TEXT NOT NULL,
+                "content" TEXT NOT NULL,
+                "updatedAt" TIMESTAMP DEFAULT NOW(),
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `;
+        
+        // إضافة الصفحات الافتراضية
+        await prisma.$executeRaw`
+            INSERT INTO "LegalPage" ("id", "slug", "title", "content")
+            VALUES 
+                (gen_random_uuid()::text, 'privacy-policy', 'سياسة الخصوصية', 'مرحباً بك في تطبيق ويندو. نحن نحترم خصوصيتك ونلتزم بحماية بياناتك الشخصية.
+
+نقوم بجمع المعلومات التالية:
+- معلومات الحساب (الاسم، البريد الإلكتروني)
+- معلومات الاستخدام لتحسين الخدمة
+- معلومات الجهاز للأمان
+
+نستخدم هذه المعلومات لـ:
+- تقديم خدماتنا وتحسينها
+- التواصل معك بشأن حسابك
+- ضمان أمان التطبيق
+
+لن نشارك معلوماتك مع أطراف ثالثة إلا بموافقتك أو عند الضرورة القانونية.
+
+للتواصل: support@windo.app'),
+                (gen_random_uuid()::text, 'terms', 'شروط الاستخدام', 'مرحباً بك في تطبيق ويندو. باستخدامك للتطبيق، فإنك توافق على الشروط التالية:
+
+1. الأهلية: يجب أن يكون عمرك 13 عاماً على الأقل.
+
+2. حسابك: أنت مسؤول عن الحفاظ على سرية حسابك.
+
+3. السلوك المقبول:
+- احترام المستخدمين الآخرين
+- عدم نشر محتوى مسيء أو غير قانوني
+- عدم انتحال شخصية الآخرين
+
+4. المحتوى: أنت مسؤول عن المحتوى الذي تنشره.
+
+5. الإنهاء: يحق لنا إنهاء حسابك في حالة مخالفة الشروط.
+
+6. التعديلات: قد نقوم بتعديل هذه الشروط من وقت لآخر.
+
+للتواصل: support@windo.app')
+            ON CONFLICT ("slug") DO NOTHING;
+        `;
+        
+        console.log('✅ LegalPage table initialized');
+    } catch (error) {
+        console.error('LegalPage init error:', error.message);
+    }
+}
+
+// تهيئة الجداول عند بدء التشغيل
+initLegalPages();
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log('');
