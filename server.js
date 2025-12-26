@@ -7522,12 +7522,43 @@ app.get('/api/admin/settings', authenticate, async (req, res) => {
 // تحديث الإعدادات
 app.put('/api/admin/settings', authenticate, async (req, res) => {
     try {
+        // استخراج الحقول المعروفة فقط
+        const {
+            harvestCoins,
+            harvestGems,
+            harvestInterval,
+            harvestReferralGems,
+            spinPrice,
+            exchangeRate,
+            referralGems,
+            roomCreationPrice,
+            minWithdraw,
+            maxWithdraw,
+            micSeatPrice,
+            micDuration
+        } = req.body;
+        
+        const updateData = {};
+        if (harvestCoins !== undefined) updateData.harvestCoins = harvestCoins;
+        if (harvestGems !== undefined) updateData.harvestGems = harvestGems;
+        if (harvestInterval !== undefined) updateData.harvestInterval = harvestInterval;
+        if (harvestReferralGems !== undefined) updateData.harvestReferralGems = harvestReferralGems;
+        if (spinPrice !== undefined) updateData.spinPrice = spinPrice;
+        if (exchangeRate !== undefined) updateData.exchangeRate = exchangeRate;
+        if (referralGems !== undefined) updateData.referralGems = referralGems;
+        if (roomCreationPrice !== undefined) updateData.roomCreationPrice = roomCreationPrice;
+        if (minWithdraw !== undefined) updateData.minWithdraw = minWithdraw;
+        if (maxWithdraw !== undefined) updateData.maxWithdraw = maxWithdraw;
+        if (micSeatPrice !== undefined) updateData.micSeatPrice = micSeatPrice;
+        if (micDuration !== undefined) updateData.micDuration = micDuration;
+        
         const settings = await prisma.appSettings.update({
             where: { id: 'settings' },
-            data: req.body
+            data: updateData
         });
         res.json(settings);
     } catch (error) {
+        console.error('Settings update error:', error);
         res.status(500).json({ error: 'خطأ في تحديث الإعدادات' });
     }
 });
