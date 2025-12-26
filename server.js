@@ -7742,6 +7742,194 @@ app.get('/api/legal/:slug', async (req, res) => {
     }
 });
 
+// صفحة ويب لسياسة الخصوصية (لـ Google Play)
+app.get('/privacy-policy', async (req, res) => {
+    try {
+        const page = await prisma.$queryRaw`
+            SELECT * FROM "LegalPage" WHERE "slug" = 'privacy-policy'
+        `;
+        
+        const content = page && page.length > 0 ? page[0].content : 'سياسة الخصوصية غير متوفرة';
+        const title = page && page.length > 0 ? page[0].title : 'سياسة الخصوصية';
+        const updatedAt = page && page.length > 0 ? new Date(page[0].updatedAt).toLocaleDateString('ar-EG') : '';
+        
+        res.send(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} - ويندو</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            line-height: 1.8;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #8B5CF6, #EC4899);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 40px;
+            font-weight: bold;
+            color: white;
+        }
+        h1 {
+            color: #fff;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .updated {
+            color: #888;
+            font-size: 14px;
+        }
+        .content {
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+            white-space: pre-wrap;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">W</div>
+            <h1>${title}</h1>
+            ${updatedAt ? `<p class="updated">آخر تحديث: ${updatedAt}</p>` : ''}
+        </div>
+        <div class="content">${content}</div>
+        <div class="footer">
+            <p>© 2024 Windo. جميع الحقوق محفوظة.</p>
+        </div>
+    </div>
+</body>
+</html>
+        `);
+    } catch (error) {
+        console.error('Privacy policy page error:', error);
+        res.status(500).send('خطأ في تحميل الصفحة');
+    }
+});
+
+// صفحة ويب لشروط الاستخدام (لـ Google Play)
+app.get('/terms', async (req, res) => {
+    try {
+        const page = await prisma.$queryRaw`
+            SELECT * FROM "LegalPage" WHERE "slug" = 'terms'
+        `;
+        
+        const content = page && page.length > 0 ? page[0].content : 'شروط الاستخدام غير متوفرة';
+        const title = page && page.length > 0 ? page[0].title : 'شروط الاستخدام';
+        const updatedAt = page && page.length > 0 ? new Date(page[0].updatedAt).toLocaleDateString('ar-EG') : '';
+        
+        res.send(`
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${title} - ويندو</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            line-height: 1.8;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #8B5CF6, #EC4899);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 40px;
+            font-weight: bold;
+            color: white;
+        }
+        h1 {
+            color: #fff;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .updated {
+            color: #888;
+            font-size: 14px;
+        }
+        .content {
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255,255,255,0.1);
+            white-space: pre-wrap;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">W</div>
+            <h1>${title}</h1>
+            ${updatedAt ? `<p class="updated">آخر تحديث: ${updatedAt}</p>` : ''}
+        </div>
+        <div class="content">${content}</div>
+        <div class="footer">
+            <p>© 2024 Windo. جميع الحقوق محفوظة.</p>
+        </div>
+    </div>
+</body>
+</html>
+        `);
+    } catch (error) {
+        console.error('Terms page error:', error);
+        res.status(500).send('خطأ في تحميل الصفحة');
+    }
+});
+
 // جلب جميع الصفحات القانونية (Admin)
 app.get('/api/admin/legal-pages', authenticate, async (req, res) => {
     try {
