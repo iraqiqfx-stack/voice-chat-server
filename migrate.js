@@ -72,6 +72,32 @@ async function migrate() {
         await client.query(`ALTER TABLE "WithdrawRequest" ALTER COLUMN "agentId" DROP NOT NULL;`);
         console.log('✅ WithdrawRequest agentId nullable');
         
+        // إنشاء جدول المستخدمين المسموح لهم بالتحويل
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "AllowedTransfer" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "userId" TEXT NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+                "email" TEXT NOT NULL,
+                "addedBy" TEXT,
+                "createdAt" TIMESTAMP DEFAULT NOW(),
+                UNIQUE("userId")
+            );
+        `);
+        console.log('✅ AllowedTransfer table');
+        
+        // إنشاء جدول التحويلات
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "CoinTransfer" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "senderId" TEXT NOT NULL REFERENCES "User"("id"),
+                "receiverId" TEXT NOT NULL REFERENCES "User"("id"),
+                "amount" INTEGER NOT NULL,
+                "note" TEXT,
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        console.log('✅ CoinTransfer table');
+        
         console.log('✅ تم تحديث قاعدة البيانات بنجاح!');
     } catch (error) {
         console.error('❌ خطأ في تحديث قاعدة البيانات:', error.message);

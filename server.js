@@ -61,6 +61,28 @@ async function runMigrations() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "accountNumber" TEXT;`);
         // Make agentId nullable
         await prisma.$executeRawUnsafe(`ALTER TABLE "WithdrawRequest" ALTER COLUMN "agentId" DROP NOT NULL;`);
+        // AllowedTransfer table
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "AllowedTransfer" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "userId" TEXT NOT NULL,
+                "email" TEXT NOT NULL,
+                "addedBy" TEXT,
+                "createdAt" TIMESTAMP DEFAULT NOW(),
+                UNIQUE("userId")
+            );
+        `);
+        // CoinTransfer table
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "CoinTransfer" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "senderId" TEXT NOT NULL,
+                "receiverId" TEXT NOT NULL,
+                "amount" INTEGER NOT NULL,
+                "note" TEXT,
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
@@ -2883,6 +2905,160 @@ app.post('/api/exchange/coins-to-gems', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Exchange error:', error);
         res.status(500).json({ error: 'خطأ في التحويل' });
+    }
+});
+
+// ============================================================
+// 💸 APIs تحويل العملات بين المستخدمين
+// ============================================================
+
+// التحقق إذا كان المستخدم مسموح له بالتحويل
+app.get('/api/transfer/check-allowed', authenticate, async (req, res) => {
+    try {
+        const allowed = await prisma.$queryRaw`
+            SELECT * FROM "AllowedTransfer" WHERE "userId" = ${req.user.id}
+        `;
+        res.json({ isAllowed: allowed.length > 0 });
+    } catch (error) {
+        res.json({ isAllowed: false });
+    }
+});
+
+// البحث عن مستخدم بكود الدعوة
+app.get('/api/transfer/find-user/:referralCode', authenticate, async (req, res) => {
+    try {
+        // التحقق من أن المستخدم مسموح له بالتحويل
+        const allowed = await prisma.$queryRaw`
+            SELECT * FROM "AllowedTransfer" WHERE "userId" = ${req.user.id}
+        `;
+        if (allowed.length === 0) {
+            return res.status(403).json({ error: 'غير مسموح لك بالتحويل' });
+        }
+        
+        const { referralCode } = req.params;
+        const user = await prisma.user.findUnique({
+            where: { referralCode },
+            select: { id: true, username: true, avatar: true, referralCode: true }
+        });
+        
+        if (!user) {
+            return res.status(404).json({ error: 'لم يتم العثور على المستخدم' });
+        }
+        
+        if (user.id === req.user.id) {
+            return res.status(400).json({ error: 'لا يمكنك التحويل لنفسك' });
+        }
+        
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في البحث' });
+    }
+});
+
+// تحويل عملات لمستخدم آخر
+app.post('/api/transfer/send', authenticate, async (req, res) => {
+    try {
+        const { receiverId, amount } = req.body;
+        const transferAmount = parseInt(amount);
+        
+        // التحقق من أن المستخدم مسموح له بالتحويل
+        const allowed = await prisma.$queryRaw`
+            SELECT * FROM "AllowedTransfer" WHERE "userId" = ${req.user.id}
+        `;
+        if (allowed.length === 0) {
+            return res.status(403).json({ error: 'غير مسموح لك بالتحويل' });
+        }
+        
+        if (!receiverId || !transferAmount || transferAmount < 1) {
+            return res.status(400).json({ error: 'بيانات غير صحيحة' });
+        }
+        
+        // التحقق من الرصيد
+        const sender = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (sender.coins < transferAmount) {
+            return res.status(400).json({ error: 'رصيدك غير كافٍ' });
+        }
+        
+        // التحقق من المستلم
+        const receiver = await prisma.user.findUnique({ 
+            where: { id: receiverId },
+            select: { id: true, username: true }
+        });
+        if (!receiver) {
+            return res.status(404).json({ error: 'المستلم غير موجود' });
+        }
+        
+        // تنفيذ التحويل
+        await prisma.$transaction([
+            prisma.user.update({
+                where: { id: req.user.id },
+                data: { coins: { decrement: transferAmount } }
+            }),
+            prisma.user.update({
+                where: { id: receiverId },
+                data: { coins: { increment: transferAmount } }
+            })
+        ]);
+        
+        // تسجيل التحويل
+        const transferId = crypto.randomUUID();
+        await prisma.$executeRaw`
+            INSERT INTO "CoinTransfer" ("id", "senderId", "receiverId", "amount", "createdAt")
+            VALUES (${transferId}, ${req.user.id}, ${receiverId}, ${transferAmount}, NOW())
+        `;
+        
+        // إشعار للمستلم
+        await createNotification(
+            receiverId,
+            'finance',
+            '💰 استلمت تحويل!',
+            `استلمت ${transferAmount} عملة من ${sender.username}`,
+            { transferId, amount: transferAmount, senderId: req.user.id }
+        );
+        
+        const updatedSender = await prisma.user.findUnique({ where: { id: req.user.id } });
+        
+        res.json({
+            success: true,
+            amount: transferAmount,
+            receiverName: receiver.username,
+            newBalance: updatedSender.coins
+        });
+    } catch (error) {
+        console.error('Transfer error:', error);
+        res.status(500).json({ error: 'خطأ في التحويل' });
+    }
+});
+
+// سجل التحويلات
+app.get('/api/transfer/history', authenticate, async (req, res) => {
+    try {
+        const transfers = await prisma.$queryRaw`
+            SELECT 
+                t.*,
+                s."username" as "senderName", s."avatar" as "senderAvatar",
+                r."username" as "receiverName", r."avatar" as "receiverAvatar"
+            FROM "CoinTransfer" t
+            LEFT JOIN "User" s ON t."senderId" = s."id"
+            LEFT JOIN "User" r ON t."receiverId" = r."id"
+            WHERE t."senderId" = ${req.user.id} OR t."receiverId" = ${req.user.id}
+            ORDER BY t."createdAt" DESC
+            LIMIT 50
+        `;
+        
+        const formatted = transfers.map(t => ({
+            id: t.id,
+            amount: t.amount,
+            type: t.senderId === req.user.id ? 'sent' : 'received',
+            otherUser: t.senderId === req.user.id 
+                ? { username: t.receiverName, avatar: t.receiverAvatar }
+                : { username: t.senderName, avatar: t.senderAvatar },
+            createdAt: t.createdAt
+        }));
+        
+        res.json(formatted);
+    } catch (error) {
+        res.json([]);
     }
 });
 
@@ -6961,6 +7137,91 @@ app.delete('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Delete payment method error:', error);
         res.status(500).json({ error: 'خطأ في حذف طريقة السحب' });
+    }
+});
+
+// ============ المستخدمين المسموح لهم بالتحويل ============
+
+// جلب المستخدمين المسموح لهم
+app.get('/api/admin/allowed-transfers', authenticate, async (req, res) => {
+    try {
+        const allowed = await prisma.$queryRaw`
+            SELECT a.*, u."username", u."avatar", u."email" as "userEmail"
+            FROM "AllowedTransfer" a
+            LEFT JOIN "User" u ON a."userId" = u."id"
+            ORDER BY a."createdAt" DESC
+        `;
+        res.json(allowed);
+    } catch (error) {
+        console.error('Get allowed transfers error:', error);
+        res.status(500).json({ error: 'خطأ في جلب البيانات' });
+    }
+});
+
+// إضافة مستخدم للمسموح لهم بالتحويل (بالبريد الإلكتروني)
+app.post('/api/admin/allowed-transfers', authenticate, async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        // البحث عن المستخدم بالبريد
+        const user = await prisma.user.findUnique({ 
+            where: { email },
+            select: { id: true, username: true, email: true }
+        });
+        
+        if (!user) {
+            return res.status(404).json({ error: 'المستخدم غير موجود' });
+        }
+        
+        // التحقق من عدم وجوده مسبقاً
+        const existing = await prisma.$queryRaw`
+            SELECT * FROM "AllowedTransfer" WHERE "userId" = ${user.id}
+        `;
+        if (existing.length > 0) {
+            return res.status(400).json({ error: 'المستخدم مضاف مسبقاً' });
+        }
+        
+        // إضافته
+        const id = crypto.randomUUID();
+        await prisma.$executeRaw`
+            INSERT INTO "AllowedTransfer" ("id", "userId", "email", "addedBy", "createdAt")
+            VALUES (${id}, ${user.id}, ${email}, ${req.user.id}, NOW())
+        `;
+        
+        res.json({ success: true, user });
+    } catch (error) {
+        console.error('Add allowed transfer error:', error);
+        res.status(500).json({ error: 'خطأ في الإضافة' });
+    }
+});
+
+// حذف مستخدم من المسموح لهم
+app.delete('/api/admin/allowed-transfers/:id', authenticate, async (req, res) => {
+    try {
+        await prisma.$executeRaw`DELETE FROM "AllowedTransfer" WHERE "id" = ${req.params.id}`;
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في الحذف' });
+    }
+});
+
+// جلب سجل التحويلات (Admin)
+app.get('/api/admin/transfers', authenticate, async (req, res) => {
+    try {
+        const transfers = await prisma.$queryRaw`
+            SELECT 
+                t.*,
+                s."username" as "senderName", s."email" as "senderEmail",
+                r."username" as "receiverName", r."email" as "receiverEmail"
+            FROM "CoinTransfer" t
+            LEFT JOIN "User" s ON t."senderId" = s."id"
+            LEFT JOIN "User" r ON t."receiverId" = r."id"
+            ORDER BY t."createdAt" DESC
+            LIMIT 100
+        `;
+        res.json(transfers);
+    } catch (error) {
+        res.json([]);
     }
 });
 
