@@ -7857,7 +7857,7 @@ app.get('/privacy-policy', async (req, res) => {
         </div>
         <div class="content">${content}</div>
         <div class="footer">
-            <p>© 2024 Windo. جميع الحقوق محفوظة.</p>
+            <p>© 2025 Windo. جميع الحقوق محفوظة.</p>
         </div>
     </div>
 </body>
@@ -7961,7 +7961,7 @@ app.get('/terms', async (req, res) => {
         </div>
         <div class="content">${content}</div>
         <div class="footer">
-            <p>© 2024 Windo. جميع الحقوق محفوظة.</p>
+            <p>© 2025 Windo. جميع الحقوق محفوظة.</p>
         </div>
     </div>
 </body>
