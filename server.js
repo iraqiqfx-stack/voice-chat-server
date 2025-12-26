@@ -3,7 +3,7 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -6735,16 +6735,35 @@ app.get('/api/admin/withdrawals', authenticate, async (req, res) => {
         const status = req.query.status;
         const where = status && status !== 'all' ? { status } : {};
         
-        const withdrawals = await prisma.withdrawRequest.findMany({
-            where,
-            include: { 
-                user: { select: { id: true, username: true, email: true } },
-                agent: { select: { id: true, name: true } }
-            },
-            orderBy: { createdAt: 'desc' }
-        });
-        res.json(withdrawals);
+        // استخدام SQL للحصول على البيانات مع طريقة السحب
+        const withdrawals = await prisma.$queryRaw`
+            SELECT 
+                w."id", w."userId", w."amount", w."status", w."note", 
+                w."paymentMethodId", w."accountNumber", w."createdAt",
+                u."id" as "user_id", u."username" as "user_username", u."email" as "user_email",
+                p."id" as "pm_id", p."name" as "pm_name", p."icon" as "pm_icon"
+            FROM "WithdrawRequest" w
+            LEFT JOIN "User" u ON w."userId" = u."id"
+            LEFT JOIN "PaymentMethod" p ON w."paymentMethodId" = p."id"
+            ${status && status !== 'all' ? Prisma.sql`WHERE w."status" = ${status}` : Prisma.empty}
+            ORDER BY w."createdAt" DESC
+        `;
+        
+        // تنسيق البيانات
+        const formatted = withdrawals.map((w: any) => ({
+            id: w.id,
+            amount: w.amount,
+            status: w.status,
+            note: w.note,
+            accountNumber: w.accountNumber,
+            createdAt: w.createdAt,
+            user: { id: w.user_id, username: w.user_username, email: w.user_email },
+            paymentMethod: w.pm_id ? { id: w.pm_id, name: w.pm_name, icon: w.pm_icon } : null
+        }));
+        
+        res.json(formatted);
     } catch (error) {
+        console.error('Get withdrawals error:', error);
         res.status(500).json({ error: 'خطأ في جلب السحوبات' });
     }
 });
