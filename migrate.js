@@ -98,6 +98,29 @@ async function migrate() {
         `);
         console.log('✅ CoinTransfer table');
         
+        // إنشاء جدول الصفحات القانونية (سياسة الخصوصية، شروط الاستخدام)
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "LegalPage" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "slug" TEXT NOT NULL UNIQUE,
+                "title" TEXT NOT NULL,
+                "content" TEXT NOT NULL,
+                "updatedAt" TIMESTAMP DEFAULT NOW(),
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        console.log('✅ LegalPage table');
+        
+        // إضافة الصفحات الافتراضية إذا لم تكن موجودة
+        await client.query(`
+            INSERT INTO "LegalPage" ("id", "slug", "title", "content")
+            VALUES 
+                (gen_random_uuid()::text, 'privacy-policy', 'سياسة الخصوصية', 'محتوى سياسة الخصوصية...'),
+                (gen_random_uuid()::text, 'terms', 'شروط الاستخدام', 'محتوى شروط الاستخدام...')
+            ON CONFLICT ("slug") DO NOTHING;
+        `);
+        console.log('✅ Default legal pages');
+        
         console.log('✅ تم تحديث قاعدة البيانات بنجاح!');
     } catch (error) {
         console.error('❌ خطأ في تحديث قاعدة البيانات:', error.message);

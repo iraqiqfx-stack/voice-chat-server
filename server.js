@@ -7720,6 +7720,65 @@ app.post('/api/voice/livekit-token', authenticate, async (req, res) => {
 });
 
 // ============================================================
+// 📜 APIs الصفحات القانونية (سياسة الخصوصية، شروط الاستخدام)
+// ============================================================
+
+// جلب صفحة قانونية (للمستخدمين - بدون مصادقة)
+app.get('/api/legal/:slug', async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const page = await prisma.$queryRaw`
+            SELECT * FROM "LegalPage" WHERE "slug" = ${slug}
+        `;
+        
+        if (!page || page.length === 0) {
+            return res.status(404).json({ error: 'الصفحة غير موجودة' });
+        }
+        
+        res.json(page[0]);
+    } catch (error) {
+        console.error('Get legal page error:', error);
+        res.status(500).json({ error: 'خطأ في جلب الصفحة' });
+    }
+});
+
+// جلب جميع الصفحات القانونية (Admin)
+app.get('/api/admin/legal-pages', authenticate, async (req, res) => {
+    try {
+        const pages = await prisma.$queryRaw`
+            SELECT * FROM "LegalPage" ORDER BY "createdAt" ASC
+        `;
+        res.json(pages);
+    } catch (error) {
+        console.error('Get legal pages error:', error);
+        res.status(500).json({ error: 'خطأ في جلب الصفحات' });
+    }
+});
+
+// تحديث صفحة قانونية (Admin)
+app.put('/api/admin/legal-pages/:slug', authenticate, async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const { title, content } = req.body;
+        
+        await prisma.$executeRaw`
+            UPDATE "LegalPage" 
+            SET "title" = ${title}, "content" = ${content}, "updatedAt" = NOW()
+            WHERE "slug" = ${slug}
+        `;
+        
+        const updated = await prisma.$queryRaw`
+            SELECT * FROM "LegalPage" WHERE "slug" = ${slug}
+        `;
+        
+        res.json(updated[0]);
+    } catch (error) {
+        console.error('Update legal page error:', error);
+        res.status(500).json({ error: 'خطأ في تحديث الصفحة' });
+    }
+});
+
+// ============================================================
 // 🚀 تشغيل السيرفر
 // ============================================================
 
