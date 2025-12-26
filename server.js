@@ -6767,32 +6767,69 @@ app.delete('/api/admin/posts/:id', authenticate, async (req, res) => {
 app.get('/api/admin/withdrawals', authenticate, async (req, res) => {
     try {
         const status = req.query.status;
-        const where = status && status !== 'all' ? { status } : {};
         
         // استخدام SQL للحصول على البيانات مع طريقة السحب
-        const withdrawals = await prisma.$queryRaw`
-            SELECT 
-                w."id", w."userId", w."amount", w."status", w."note", 
-                w."paymentMethodId", w."accountNumber", w."createdAt",
-                u."id" as "user_id", u."username" as "user_username", u."email" as "user_email",
-                p."id" as "pm_id", p."name" as "pm_name", p."icon" as "pm_icon"
-            FROM "WithdrawRequest" w
-            LEFT JOIN "User" u ON w."userId" = u."id"
-            LEFT JOIN "PaymentMethod" p ON w."paymentMethodId" = p."id"
-            ${status && status !== 'all' ? Prisma.sql`WHERE w."status" = ${status}` : Prisma.empty}
-            ORDER BY w."createdAt" DESC
-        `;
+        let withdrawals;
+        if (status && status !== 'all') {
+            withdrawals = await prisma.$queryRaw`
+                SELECT 
+                    w."id", w."userId", w."amount", w."status", w."note", 
+                    w."paymentMethodId", w."accountNumber", w."createdAt",
+                    u."id" as "user_id", u."username" as "user_username", u."email" as "user_email",
+                    p."id" as "pm_id", p."name" as "pm_name", p."icon" as "pm_icon"
+                FROM "WithdrawRequest" w
+                LEFT JOIN "User" u ON w."userId" = u."id"
+                LEFT JOIN "PaymentMethod" p ON w."paymentMethodId" = p."id"
+                WHERE w."status" = ${status}
+                ORDER BY w."createdAt" DESC
+            `;
+        } else {
+            withdrawals = await prisma.$queryRaw`
+                SELECT 
+                    w."id", w."userId", w."amount", w."status", w."note", 
+                    w."paymentMethodId", w."accountNumber", w."createdAt",
+                    u."id" as "user_id", u."username" as "user_username", u."email" as "user_email",
+                    p."id" as "pm_id", p."name" as "pm_name", p."icon" as "pm_icon"
+                FROM "WithdrawRequest" w
+                LEFT JOIN "User" u ON w."userId" = u."id"
+                LEFT JOIN "PaymentMethod" p ON w."paymentMethodId" = p."id"
+                ORDER BY w."createdAt" DESC
+            `;
+        }
         
-        // تنسيق البيانات
-        const formatted = withdrawals.map((w) => ({
-            id: w.id,
-            amount: w.amount,
-            status: w.status,
-            note: w.note,
-            accountNumber: w.accountNumber,
-            createdAt: w.createdAt,
-            user: { id: w.user_id, username: w.user_username, email: w.user_email },
-            paymentMethod: w.pm_id ? { id: w.pm_id, name: w.pm_name, icon: w.pm_icon } : null
+        // جلب الباقات المفعلة لكل مستخدم
+        const formatted = await Promise.all(withdrawals.map(async (w) => {
+            let activePackages = [];
+            try {
+                const packages = await prisma.userPackage.findMany({
+                    where: {
+                        userId: w.user_id,
+                        isActive: true,
+                        expiresAt: { gt: new Date() }
+                    },
+                    include: {
+                        package: { select: { id: true, name: true, nameAr: true, icon: true, color: true } }
+                    }
+                });
+                activePackages = packages.map(up => ({
+                    id: up.package.id,
+                    name: up.package.name,
+                    nameAr: up.package.nameAr,
+                    icon: up.package.icon,
+                    color: up.package.color
+                }));
+            } catch (e) {}
+            
+            return {
+                id: w.id,
+                amount: w.amount,
+                status: w.status,
+                note: w.note,
+                accountNumber: w.accountNumber,
+                createdAt: w.createdAt,
+                user: { id: w.user_id, username: w.user_username, email: w.user_email, activePackages },
+                paymentMethod: w.pm_id ? { id: w.pm_id, name: w.pm_name, icon: w.pm_icon } : null
+            };
         }));
         
         res.json(formatted);
