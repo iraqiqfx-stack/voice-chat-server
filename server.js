@@ -1140,7 +1140,10 @@ app.get('/api/harvest/status', authenticate, async (req, res) => {
 app.post('/api/harvest/collect', authenticate, async (req, res) => {
     try {
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
-        const user = req.user;
+        const user = await prisma.user.findUnique({ 
+            where: { id: req.user.id },
+            select: { id: true, lastHarvest: true, referredBy: true, username: true }
+        });
         
         // التحقق من إمكانية الحصاد
         if (user.lastHarvest) {
@@ -1189,6 +1192,26 @@ app.post('/api/harvest/collect', authenticate, async (req, res) => {
             `حصلت على ${totalCoins} عملة و ${totalGems} جوهرة`,
             { coins: totalCoins, gems: totalGems, packagesCount: userPackages.length }
         );
+        
+        // إرسال هدية للداعي (مجوهرات)
+        if (user.referredBy) {
+            const harvestReferralGems = settings.harvestReferralGems || 5;
+            
+            // تحديث رصيد الداعي
+            await prisma.user.update({
+                where: { id: user.referredBy },
+                data: { gems: { increment: harvestReferralGems } }
+            });
+            
+            // إشعار للداعي
+            await createNotification(
+                user.referredBy,
+                'referral',
+                '💎 هدية من فريقك!',
+                `${user.username} جمع المحصول وحصلت على ${harvestReferralGems} جوهرة`,
+                { fromUserId: user.id, gems: harvestReferralGems }
+            );
+        }
         
         res.json({ 
             coins: totalCoins, 
@@ -8053,6 +8076,19 @@ async function initLegalPages() {
 
 // تهيئة الجداول عند بدء التشغيل
 initLegalPages();
+
+// إضافة عمود harvestReferralGems إذا لم يكن موجوداً
+async function initHarvestReferralGems() {
+    try {
+        await prisma.$executeRaw`
+            ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "harvestReferralGems" DOUBLE PRECISION DEFAULT 5;
+        `;
+        console.log('✅ harvestReferralGems column initialized');
+    } catch (error) {
+        console.error('harvestReferralGems init error:', error.message);
+    }
+}
+initHarvestReferralGems();
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log('');

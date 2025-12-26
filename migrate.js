@@ -34,6 +34,10 @@ async function migrate() {
         await client.query(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micDuration" INTEGER DEFAULT 30;`);
         console.log('✅ micDuration');
         
+        // إضافة عمود harvestReferralGems لجدول AppSettings (هدية الداعي عند كل جمع محصول)
+        await client.query(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "harvestReferralGems" DOUBLE PRECISION DEFAULT 5;`);
+        console.log('✅ harvestReferralGems');
+        
         // إضافة حقول الوكلاء الجديدة
         await client.query(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "whatsapp" TEXT;`);
         await client.query(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "telegram" TEXT;`);
