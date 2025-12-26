@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import dotenv from 'dotenv';
 
@@ -2942,7 +2943,7 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
         });
         
         // إنشاء طلب السحب باستخدام SQL
-        const withdrawId = require('crypto').randomUUID();
+        const withdrawId = crypto.randomUUID();
         await prisma.$executeRaw`
             INSERT INTO "WithdrawRequest" ("id", "userId", "amount", "status", "paymentMethodId", "accountNumber", "createdAt")
             VALUES (${withdrawId}, ${req.user.id}, ${netAmount}, 'pending', ${paymentMethodId}, ${accountNumber}, NOW())
@@ -6825,7 +6826,7 @@ app.get('/api/admin/payment-methods', authenticate, async (req, res) => {
 app.post('/api/admin/payment-methods', authenticate, async (req, res) => {
     try {
         const { name, icon, minAmount, maxAmount, fee, isActive } = req.body;
-        const id = require('crypto').randomUUID();
+        const id = crypto.randomUUID();
         await prisma.$executeRaw`
             INSERT INTO "PaymentMethod" ("id", "name", "icon", "minAmount", "maxAmount", "fee", "isActive", "createdAt")
             VALUES (${id}, ${name}, ${icon || null}, ${minAmount || 100}, ${maxAmount || 10000}, ${fee || 0}, ${isActive !== false}, NOW())
