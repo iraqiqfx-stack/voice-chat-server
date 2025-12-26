@@ -7507,14 +7507,21 @@ app.delete('/api/admin/stories/:id', authenticate, async (req, res) => {
 // جلب الإعدادات
 app.get('/api/admin/settings', authenticate, async (req, res) => {
     try {
-        let settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
-        if (!settings) {
-            settings = await prisma.appSettings.create({
-                data: { id: 'settings' }
-            });
+        // استخدام raw query لجلب جميع الحقول بما فيها الجديدة
+        let settings = await prisma.$queryRaw`SELECT * FROM "AppSettings" WHERE "id" = 'settings'`;
+        
+        if (!settings || settings.length === 0) {
+            await prisma.$executeRaw`
+                INSERT INTO "AppSettings" ("id", "harvestCoins", "harvestGems", "harvestInterval", "harvestReferralGems", "spinPrice", "exchangeRate", "referralGems", "roomCreationPrice", "minWithdraw", "maxWithdraw", "micSeatPrice", "micDuration")
+                VALUES ('settings', 100, 10, 24, 5, 50, 1000, 50, 500, 100, 10000, 100, 30)
+                ON CONFLICT ("id") DO NOTHING
+            `;
+            settings = await prisma.$queryRaw`SELECT * FROM "AppSettings" WHERE "id" = 'settings'`;
         }
-        res.json(settings);
+        
+        res.json(settings[0] || {});
     } catch (error) {
+        console.error('Get settings error:', error);
         res.status(500).json({ error: 'خطأ في جلب الإعدادات' });
     }
 });
@@ -7522,7 +7529,6 @@ app.get('/api/admin/settings', authenticate, async (req, res) => {
 // تحديث الإعدادات
 app.put('/api/admin/settings', authenticate, async (req, res) => {
     try {
-        // استخراج الحقول المعروفة فقط
         const {
             harvestCoins,
             harvestGems,
@@ -7538,25 +7544,27 @@ app.put('/api/admin/settings', authenticate, async (req, res) => {
             micDuration
         } = req.body;
         
-        const updateData = {};
-        if (harvestCoins !== undefined) updateData.harvestCoins = harvestCoins;
-        if (harvestGems !== undefined) updateData.harvestGems = harvestGems;
-        if (harvestInterval !== undefined) updateData.harvestInterval = harvestInterval;
-        if (harvestReferralGems !== undefined) updateData.harvestReferralGems = harvestReferralGems;
-        if (spinPrice !== undefined) updateData.spinPrice = spinPrice;
-        if (exchangeRate !== undefined) updateData.exchangeRate = exchangeRate;
-        if (referralGems !== undefined) updateData.referralGems = referralGems;
-        if (roomCreationPrice !== undefined) updateData.roomCreationPrice = roomCreationPrice;
-        if (minWithdraw !== undefined) updateData.minWithdraw = minWithdraw;
-        if (maxWithdraw !== undefined) updateData.maxWithdraw = maxWithdraw;
-        if (micSeatPrice !== undefined) updateData.micSeatPrice = micSeatPrice;
-        if (micDuration !== undefined) updateData.micDuration = micDuration;
+        // استخدام raw query لتحديث جميع الحقول بما فيها الجديدة
+        await prisma.$executeRaw`
+            UPDATE "AppSettings" SET
+                "harvestCoins" = ${harvestCoins || 100},
+                "harvestGems" = ${harvestGems || 10},
+                "harvestInterval" = ${harvestInterval || 24},
+                "harvestReferralGems" = ${harvestReferralGems || 5},
+                "spinPrice" = ${spinPrice || 50},
+                "exchangeRate" = ${exchangeRate || 1000},
+                "referralGems" = ${referralGems || 50},
+                "roomCreationPrice" = ${roomCreationPrice || 500},
+                "minWithdraw" = ${minWithdraw || 100},
+                "maxWithdraw" = ${maxWithdraw || 10000},
+                "micSeatPrice" = ${micSeatPrice || 100},
+                "micDuration" = ${micDuration || 30}
+            WHERE "id" = 'settings'
+        `;
         
-        const settings = await prisma.appSettings.update({
-            where: { id: 'settings' },
-            data: updateData
-        });
-        res.json(settings);
+        // جلب الإعدادات المحدثة
+        const settings = await prisma.$queryRaw`SELECT * FROM "AppSettings" WHERE "id" = 'settings'`;
+        res.json(settings[0] || {});
     } catch (error) {
         console.error('Settings update error:', error);
         res.status(500).json({ error: 'خطأ في تحديث الإعدادات' });
