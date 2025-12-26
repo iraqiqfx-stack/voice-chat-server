@@ -6750,7 +6750,7 @@ app.get('/api/admin/withdrawals', authenticate, async (req, res) => {
         `;
         
         // تنسيق البيانات
-        const formatted = withdrawals.map((w: any) => ({
+        const formatted = withdrawals.map((w) => ({
             id: w.id,
             amount: w.amount,
             status: w.status,
