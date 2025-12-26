@@ -2951,8 +2951,8 @@ app.post('/api/withdraw', authenticate, async (req, res) => {
         // إنشاء طلب السحب باستخدام SQL
         const withdrawId = crypto.randomUUID();
         await prisma.$executeRaw`
-            INSERT INTO "WithdrawRequest" ("id", "userId", "amount", "status", "paymentMethodId", "accountNumber", "createdAt")
-            VALUES (${withdrawId}, ${req.user.id}, ${netAmount}, 'pending', ${paymentMethodId}, ${accountNumber}, NOW())
+            INSERT INTO "WithdrawRequest" ("id", "userId", "amount", "status", "paymentMethodId", "accountNumber", "createdAt", "updatedAt")
+            VALUES (${withdrawId}, ${req.user.id}, ${netAmount}, 'pending', ${paymentMethodId}, ${accountNumber}, NOW(), NOW())
         `;
         
         // إشعار طلب السحب
