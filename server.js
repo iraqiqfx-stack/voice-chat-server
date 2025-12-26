@@ -752,6 +752,73 @@ app.put('/api/profile/privacy', authenticate, async (req, res) => {
     }
 });
 
+// حذف الحساب نهائياً
+app.delete('/api/profile/delete-account', authenticate, async (req, res) => {
+    try {
+        const { password } = req.body;
+        const userId = req.user.id;
+        
+        // التحقق من كلمة المرور
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ error: 'المستخدم غير موجود' });
+        }
+        
+        const bcrypt = await import('bcryptjs');
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
+        }
+        
+        // حذف جميع البيانات المرتبطة بالمستخدم
+        await prisma.$transaction(async (tx) => {
+            // حذف الرسائل
+            await tx.chatMessage.deleteMany({ where: { userId } });
+            
+            // حذف التعليقات
+            await tx.comment.deleteMany({ where: { userId } });
+            
+            // حذف الإعجابات
+            await tx.like.deleteMany({ where: { userId } });
+            
+            // حذف المنشورات
+            await tx.post.deleteMany({ where: { userId } });
+            
+            // حذف الإشعارات
+            await tx.notification.deleteMany({ where: { userId } });
+            
+            // حذف طلبات السحب
+            await tx.$executeRaw`DELETE FROM "WithdrawRequest" WHERE "userId" = ${userId}`;
+            
+            // حذف التحويلات
+            await tx.$executeRaw`DELETE FROM "CoinTransfer" WHERE "senderId" = ${userId} OR "receiverId" = ${userId}`;
+            
+            // حذف من المسموح لهم بالتحويل
+            await tx.$executeRaw`DELETE FROM "AllowedTransfer" WHERE "userId" = ${userId}`;
+            
+            // حذف المتابعات
+            await tx.follow.deleteMany({ where: { OR: [{ followerId: userId }, { followingId: userId }] } });
+            
+            // حذف عضويات الغرف
+            await tx.roomMember.deleteMany({ where: { odId: userId } });
+            
+            // حذف الغرف المملوكة
+            await tx.chatRoom.deleteMany({ where: { ownerId: userId } });
+            
+            // حذف الباقات
+            await tx.userPackage.deleteMany({ where: { userId } });
+            
+            // حذف المستخدم نفسه
+            await tx.user.delete({ where: { id: userId } });
+        });
+        
+        res.json({ success: true, message: 'تم حذف الحساب بنجاح' });
+    } catch (error) {
+        console.error('Delete account error:', error);
+        res.status(500).json({ error: 'خطأ في حذف الحساب' });
+    }
+});
+
 // ============================================================
 // 👤 APIs الملف الشخصي للمستخدمين الآخرين
 // ============================================================
