@@ -68,6 +68,10 @@ async function migrate() {
         await client.query(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "accountNumber" TEXT;`);
         console.log('✅ WithdrawRequest fields (paymentMethodId, accountNumber)');
         
+        // جعل agentId اختياري في WithdrawRequest
+        await client.query(`ALTER TABLE "WithdrawRequest" ALTER COLUMN "agentId" DROP NOT NULL;`);
+        console.log('✅ WithdrawRequest agentId nullable');
+        
         console.log('✅ تم تحديث قاعدة البيانات بنجاح!');
     } catch (error) {
         console.error('❌ خطأ في تحديث قاعدة البيانات:', error.message);

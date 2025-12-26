@@ -39,6 +39,10 @@ async function runMigrations() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "ChatRoom" ADD COLUMN IF NOT EXISTS "micExpiresAt" TIMESTAMP;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micSeatPrice" DOUBLE PRECISION DEFAULT 100;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "micDuration" INTEGER DEFAULT 30;`);
+        // Agent fields
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "whatsapp" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "telegram" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Agent" ADD COLUMN IF NOT EXISTS "address" TEXT;`);
         // PaymentMethod table
         await prisma.$executeRawUnsafe(`
             CREATE TABLE IF NOT EXISTS "PaymentMethod" (
@@ -55,6 +59,8 @@ async function runMigrations() {
         // WithdrawRequest new fields
         await prisma.$executeRawUnsafe(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "paymentMethodId" TEXT;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "WithdrawRequest" ADD COLUMN IF NOT EXISTS "accountNumber" TEXT;`);
+        // Make agentId nullable
+        await prisma.$executeRawUnsafe(`ALTER TABLE "WithdrawRequest" ALTER COLUMN "agentId" DROP NOT NULL;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
