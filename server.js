@@ -83,6 +83,26 @@ async function runMigrations() {
                 "createdAt" TIMESTAMP DEFAULT NOW()
             );
         `);
+        // DepositRequest table (طلبات الإيداع)
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "deposit_request" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "userId" TEXT NOT NULL,
+                "amount" DOUBLE PRECISION NOT NULL,
+                "paymentMethod" TEXT NOT NULL,
+                "accountNumber" TEXT,
+                "proofImage" TEXT NOT NULL,
+                "status" TEXT DEFAULT 'pending',
+                "note" TEXT,
+                "adminNote" TEXT,
+                "coinsToAdd" DOUBLE PRECISION,
+                "gemsToAdd" DOUBLE PRECISION,
+                "processedBy" TEXT,
+                "processedAt" TIMESTAMP,
+                "createdAt" TIMESTAMP DEFAULT NOW(),
+                "updatedAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
@@ -330,9 +350,15 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
         }
         
+        // التحقق من أن البريد Gmail فقط
+        const emailLower = email.toLowerCase().trim();
+        if (!emailLower.endsWith('@gmail.com')) {
+            return res.status(400).json({ error: 'يجب استخدام بريد Gmail فقط' });
+        }
+        
         // التحقق من عدم وجود المستخدم
         const existingUser = await prisma.user.findFirst({
-            where: { OR: [{ email }, { username }] }
+            where: { OR: [{ email: emailLower }, { username }] }
         });
         
         if (existingUser) {
@@ -354,7 +380,7 @@ app.post('/api/auth/register', async (req, res) => {
         const user = await prisma.user.create({
             data: {
                 username,
-                email,
+                email: emailLower,
                 password: hashedPassword,
                 referralCode: generateReferralCode(),
                 referredBy: referrer?.id || null,
@@ -7171,6 +7197,205 @@ app.delete('/api/admin/agents/:id', authenticate, async (req, res) => {
     }
 });
 
+// ============ طلبات الإيداع (Deposit Requests) ============
+
+// إنشاء طلب إيداع جديد (من المستخدم)
+app.post('/api/deposit', authenticate, async (req, res) => {
+    try {
+        const { amount, paymentMethod, accountNumber, proofImage, note } = req.body;
+        
+        if (!amount || !paymentMethod || !proofImage) {
+            return res.status(400).json({ error: 'يرجى إدخال المبلغ وطريقة الدفع وصورة الإثبات' });
+        }
+        
+        if (amount <= 0) {
+            return res.status(400).json({ error: 'المبلغ يجب أن يكون أكبر من صفر' });
+        }
+        
+        const depositId = crypto.randomUUID();
+        await prisma.$executeRaw`
+            INSERT INTO "deposit_request" ("id", "userId", "amount", "paymentMethod", "accountNumber", "proofImage", "note", "status", "createdAt", "updatedAt")
+            VALUES (${depositId}, ${req.user.id}, ${amount}, ${paymentMethod}, ${accountNumber || null}, ${proofImage}, ${note || null}, 'pending', NOW(), NOW())
+        `;
+        
+        // إشعار للمستخدم
+        await createNotification(
+            req.user.id,
+            'finance',
+            '📥 تم إرسال طلب الإيداع',
+            `طلب إيداع ${amount} عبر ${paymentMethod} قيد المراجعة`,
+            { depositId, amount, status: 'pending' }
+        );
+        
+        res.json({ 
+            success: true, 
+            message: 'تم إرسال طلب الإيداع بنجاح',
+            depositId 
+        });
+    } catch (error) {
+        console.error('Create deposit error:', error);
+        res.status(500).json({ error: 'خطأ في إنشاء طلب الإيداع' });
+    }
+});
+
+// جلب طلبات الإيداع للمستخدم الحالي
+app.get('/api/deposits/my', authenticate, async (req, res) => {
+    try {
+        const deposits = await prisma.$queryRaw`
+            SELECT * FROM "deposit_request" 
+            WHERE "userId" = ${req.user.id}
+            ORDER BY "createdAt" DESC
+        `;
+        res.json(deposits);
+    } catch (error) {
+        console.error('Get my deposits error:', error);
+        res.status(500).json({ error: 'خطأ في جلب طلبات الإيداع' });
+    }
+});
+
+// جلب طلبات الإيداع (للأدمن)
+app.get('/api/admin/deposits', authenticate, async (req, res) => {
+    try {
+        const status = req.query.status || 'all';
+        let deposits;
+        
+        if (status === 'all') {
+            deposits = await prisma.$queryRaw`
+                SELECT d.*, u.username, u.email, u.avatar as "userAvatar"
+                FROM "deposit_request" d
+                LEFT JOIN "User" u ON d."userId" = u.id
+                ORDER BY d."createdAt" DESC
+            `;
+        } else {
+            deposits = await prisma.$queryRaw`
+                SELECT d.*, u.username, u.email, u.avatar as "userAvatar"
+                FROM "deposit_request" d
+                LEFT JOIN "User" u ON d."userId" = u.id
+                WHERE d.status = ${status}
+                ORDER BY d."createdAt" DESC
+            `;
+        }
+        
+        res.json(deposits);
+    } catch (error) {
+        console.error('Get deposits error:', error);
+        res.status(500).json({ error: 'خطأ في جلب طلبات الإيداع' });
+    }
+});
+
+// الموافقة على طلب إيداع
+app.post('/api/admin/deposits/:id/approve', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { coinsToAdd, gemsToAdd, note } = req.body;
+        
+        // جلب طلب الإيداع
+        const deposits = await prisma.$queryRaw`SELECT * FROM "deposit_request" WHERE id = ${id}`;
+        if (!deposits || deposits.length === 0) {
+            return res.status(404).json({ error: 'طلب الإيداع غير موجود' });
+        }
+        
+        const deposit = deposits[0];
+        if (deposit.status !== 'pending') {
+            return res.status(400).json({ error: 'تم معالجة هذا الطلب مسبقاً' });
+        }
+        
+        // تحديث طلب الإيداع
+        await prisma.$executeRaw`
+            UPDATE "deposit_request" 
+            SET status = 'approved', 
+                "coinsToAdd" = ${coinsToAdd || 0}, 
+                "gemsToAdd" = ${gemsToAdd || 0},
+                "adminNote" = ${note || null},
+                "processedBy" = ${req.user.id},
+                "processedAt" = NOW(),
+                "updatedAt" = NOW()
+            WHERE id = ${id}
+        `;
+        
+        // إضافة العملات والجواهر للمستخدم
+        if (coinsToAdd > 0 || gemsToAdd > 0) {
+            await prisma.user.update({
+                where: { id: deposit.userId },
+                data: {
+                    coins: { increment: coinsToAdd || 0 },
+                    gems: { increment: gemsToAdd || 0 }
+                }
+            });
+            
+            // إرسال إشعار للمستخدم
+            await createNotification(
+                deposit.userId,
+                'system',
+                '✅ تمت الموافقة على إيداعك',
+                `تم إضافة ${coinsToAdd || 0} عملة و ${gemsToAdd || 0} جوهرة إلى حسابك`,
+                { depositId: id, coinsToAdd, gemsToAdd }
+            );
+        }
+        
+        res.json({ success: true, message: 'تمت الموافقة على الإيداع' });
+    } catch (error) {
+        console.error('Approve deposit error:', error);
+        res.status(500).json({ error: 'خطأ في الموافقة على الإيداع' });
+    }
+});
+
+// رفض طلب إيداع
+app.post('/api/admin/deposits/:id/reject', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+        
+        // جلب طلب الإيداع
+        const deposits = await prisma.$queryRaw`SELECT * FROM "deposit_request" WHERE id = ${id}`;
+        if (!deposits || deposits.length === 0) {
+            return res.status(404).json({ error: 'طلب الإيداع غير موجود' });
+        }
+        
+        const deposit = deposits[0];
+        if (deposit.status !== 'pending') {
+            return res.status(400).json({ error: 'تم معالجة هذا الطلب مسبقاً' });
+        }
+        
+        // تحديث طلب الإيداع
+        await prisma.$executeRaw`
+            UPDATE "deposit_request" 
+            SET status = 'rejected', 
+                "adminNote" = ${reason || 'تم الرفض'},
+                "processedBy" = ${req.user.id},
+                "processedAt" = NOW(),
+                "updatedAt" = NOW()
+            WHERE id = ${id}
+        `;
+        
+        // إرسال إشعار للمستخدم
+        await createNotification(
+            deposit.userId,
+            'system',
+            '❌ تم رفض طلب الإيداع',
+            reason || 'تم رفض طلب الإيداع الخاص بك',
+            { depositId: id, reason }
+        );
+        
+        res.json({ success: true, message: 'تم رفض الإيداع' });
+    } catch (error) {
+        console.error('Reject deposit error:', error);
+        res.status(500).json({ error: 'خطأ في رفض الإيداع' });
+    }
+});
+
+// حذف طلب إيداع
+app.delete('/api/admin/deposits/:id', authenticate, async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.$executeRaw`DELETE FROM "deposit_request" WHERE id = ${id}`;
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Delete deposit error:', error);
+        res.status(500).json({ error: 'خطأ في حذف طلب الإيداع' });
+    }
+});
+
 // ============ طرق السحب (Payment Methods) ============
 
 // جلب طرق السحب
@@ -7236,12 +7461,27 @@ app.delete('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
 app.get('/api/admin/allowed-transfers', authenticate, async (req, res) => {
     try {
         const allowed = await prisma.$queryRaw`
-            SELECT a.*, u."username", u."avatar", u."email" as "userEmail"
+            SELECT a."id", a."email", a."userId", a."createdAt",
+                   u."username", u."avatar", u."email" as "userEmail"
             FROM "AllowedTransfer" a
             LEFT JOIN "User" u ON a."userId" = u."id"
             ORDER BY a."createdAt" DESC
         `;
-        res.json(allowed);
+        
+        // تحويل البيانات للتنسيق المتوقع
+        const formattedAllowed = allowed.map(a => ({
+            id: a.id,
+            email: a.email,
+            createdAt: a.createdAt,
+            user: a.userId ? {
+                id: a.userId,
+                username: a.username,
+                avatar: a.avatar,
+                email: a.userEmail
+            } : null
+        }));
+        
+        res.json(formattedAllowed);
     } catch (error) {
         console.error('Get allowed transfers error:', error);
         res.status(500).json({ error: 'خطأ في جلب البيانات' });
@@ -7300,17 +7540,37 @@ app.get('/api/admin/transfers', authenticate, async (req, res) => {
     try {
         const transfers = await prisma.$queryRaw`
             SELECT 
-                t.*,
-                s."username" as "senderName", s."email" as "senderEmail",
-                r."username" as "receiverName", r."email" as "receiverEmail"
+                t."id", t."amount", t."createdAt",
+                t."senderId", t."receiverId",
+                s."username" as "senderUsername", s."avatar" as "senderAvatar",
+                r."username" as "receiverUsername", r."avatar" as "receiverAvatar"
             FROM "CoinTransfer" t
             LEFT JOIN "User" s ON t."senderId" = s."id"
             LEFT JOIN "User" r ON t."receiverId" = r."id"
             ORDER BY t."createdAt" DESC
             LIMIT 100
         `;
-        res.json(transfers);
+        
+        // تحويل البيانات للتنسيق المتوقع
+        const formattedTransfers = transfers.map(t => ({
+            id: t.id,
+            amount: t.amount,
+            createdAt: t.createdAt,
+            sender: {
+                id: t.senderId,
+                username: t.senderUsername || 'مستخدم محذوف',
+                avatar: t.senderAvatar
+            },
+            receiver: {
+                id: t.receiverId,
+                username: t.receiverUsername || 'مستخدم محذوف',
+                avatar: t.receiverAvatar
+            }
+        }));
+        
+        res.json(formattedTransfers);
     } catch (error) {
+        console.error('Error fetching transfers:', error);
         res.json([]);
     }
 });

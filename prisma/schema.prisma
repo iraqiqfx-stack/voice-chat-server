@@ -36,6 +36,7 @@ model User {
   ownedRooms         ChatRoom[]      @relation("RoomOwner")
   messages           ChatMessage[]
   withdraws          WithdrawRequest[]
+  deposits           DepositRequest[]
   roomMemberships    RoomMember[]
   moderatorRoles     RoomModerator[]
   sentGifts          GiftMessage[]   @relation("GiftSender")
@@ -377,6 +378,31 @@ model Agent {
   address   String?
   status    String            @default("offline") // online, offline, busy
   createdAt DateTime          @default(now())
+}
+
+// =================== طلبات الإيداع ===================
+model DepositRequest {
+  id              String   @id @default(uuid())
+  userId          String
+  amount          Float    // المبلغ المطلوب إيداعه
+  paymentMethod   String   // طريقة الدفع (زين كاش، ماستر كارد، إلخ)
+  accountNumber   String?  // رقم الحساب المرسل منه
+  proofImage      String   // صورة إثبات التحويل
+  status          String   @default("pending") // pending, approved, rejected
+  note            String?  // ملاحظة من الإدارة
+  adminNote       String?  // سبب الرفض أو ملاحظة
+  coinsToAdd      Float?   // العملات التي ستضاف (يحددها الأدمن)
+  gemsToAdd       Float?   // الجواهر التي ستضاف (يحددها الأدمن)
+  processedBy     String?  // معرف الأدمن الذي عالج الطلب
+  processedAt     DateTime? // تاريخ المعالجة
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([status])
+  @@map("deposit_request")
 }
 
 // =================== عجلة الحظ ===================
