@@ -601,19 +601,25 @@ model DirectMessage {
 }
 
 
-// =================== نظام المهام ===================
+// =================== نظام المهام/الإعلانات ===================
 model Task {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  image       String?
-  url         String   // الرابط الذي يفتح عند الضغط على المهمة
-  reward      Float    @default(10) // مكافأة الجواهر
-  duration    Int      @default(30) // المدة بالثواني التي يجب أن يبقى فيها المستخدم
-  cooldown    Int      @default(24) // فترة الانتظار بالساعات قبل إعادة المهمة
-  isActive    Boolean  @default(true)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
+  id              String   @id @default(uuid())
+  name            String
+  description     String?
+  image           String?
+  url             String   // الرابط الذي يفتح عند الضغط على المهمة
+  reward          Float    @default(10) // مكافأة الجواهر
+  duration        Int      @default(30) // المدة بالثواني التي يجب أن يبقى فيها المستخدم
+  cooldown        Int      @default(24) // فترة الانتظار بالساعات قبل إعادة المهمة
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  // حقول الإعلانات المدفوعة
+  isUserAd        Boolean  @default(false) // هل هو إعلان من مستخدم
+  userId          String?  // صاحب الإعلان
+  targetViews     Int      @default(0) // عدد المشاهدات المطلوبة
+  currentViews    Int      @default(0) // عدد المشاهدات الحالية
+  totalCost       Float    @default(0) // التكلفة الإجمالية
+  createdAt       DateTime @default(now())
   
   completions TaskCompletion[]
   

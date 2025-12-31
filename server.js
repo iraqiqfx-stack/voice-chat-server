@@ -8826,9 +8826,22 @@ async function initTasksTable() {
                 "cooldown" INTEGER DEFAULT 24,
                 "isActive" BOOLEAN DEFAULT true,
                 "sortOrder" INTEGER DEFAULT 0,
+                "isUserAd" BOOLEAN DEFAULT false,
+                "userId" TEXT,
+                "targetViews" INTEGER DEFAULT 0,
+                "currentViews" INTEGER DEFAULT 0,
+                "totalCost" DOUBLE PRECISION DEFAULT 0,
                 "createdAt" TIMESTAMP DEFAULT NOW()
             );
         `);
+        // إضافة الأعمدة الجديدة إذا لم تكن موجودة
+        await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "isUserAd" BOOLEAN DEFAULT false;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "userId" TEXT;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "targetViews" INTEGER DEFAULT 0;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "currentViews" INTEGER DEFAULT 0;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "totalCost" DOUBLE PRECISION DEFAULT 0;`);
+        // إضافة سعر الإعلانات في الإعدادات
+        await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "adPricePer1000" DOUBLE PRECISION DEFAULT 100;`);
         await prisma.$executeRawUnsafe(`
             CREATE TABLE IF NOT EXISTS "task_completion" (
                 "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -8850,7 +8863,11 @@ initTasksTable();
 app.get('/api/tasks', authenticate, async (req, res) => {
     try {
         const tasks = await prisma.$queryRaw`
-            SELECT * FROM "task" WHERE "isActive" = true ORDER BY "sortOrder" ASC, "createdAt" DESC
+            SELECT * FROM "task" 
+            WHERE "isActive" = true 
+            AND ("targetViews" = 0 OR "currentViews" < "targetViews")
+            AND "id" != ${req.user.id}
+            ORDER BY "sortOrder" ASC, "createdAt" DESC
         `;
         
         // الحصول على آخر إكمال لكل مهمة للمستخدم
@@ -8866,8 +8883,8 @@ app.get('/api/tasks', authenticate, async (req, res) => {
             completionMap[c.taskId] = c.lastCompleted;
         });
         
-        // إضافة معلومات الإكمال لكل مهمة
-        const tasksWithStatus = tasks.map(task => {
+        // إضافة معلومات الإكمال لكل مهمة (استبعاد إعلانات المستخدم نفسه)
+        const tasksWithStatus = tasks.filter(task => task.userId !== req.user.id).map(task => {
             const lastCompleted = completionMap[task.id];
             let canComplete = true;
             let nextAvailable = null;
@@ -8912,6 +8929,11 @@ app.post('/api/tasks/:taskId/complete', authenticate, async (req, res) => {
         
         const task = tasks[0];
         
+        // لا يمكن للمستخدم إكمال إعلانه الخاص
+        if (task.userId === req.user.id) {
+            return res.status(400).json({ error: 'لا يمكنك إكمال إعلانك الخاص' });
+        }
+        
         // التحقق من فترة الانتظار
         const lastCompletion = await prisma.$queryRaw`
             SELECT * FROM "task_completion"
@@ -8937,6 +8959,18 @@ app.post('/api/tasks/:taskId/complete', authenticate, async (req, res) => {
             VALUES (gen_random_uuid()::text, ${taskId}, ${req.user.id}, NOW())
         `;
         
+        // زيادة عدد المشاهدات للإعلان
+        await prisma.$executeRaw`
+            UPDATE "task" SET "currentViews" = "currentViews" + 1 WHERE "id" = ${taskId}
+        `;
+        
+        // التحقق من اكتمال المشاهدات المطلوبة
+        if (task.targetViews > 0 && task.currentViews + 1 >= task.targetViews) {
+            await prisma.$executeRaw`
+                UPDATE "task" SET "isActive" = false WHERE "id" = ${taskId}
+            `;
+        }
+        
         // إضافة المكافأة
         await prisma.user.update({
             where: { id: req.user.id },
@@ -8960,6 +8994,102 @@ app.post('/api/tasks/:taskId/complete', authenticate, async (req, res) => {
     } catch (error) {
         console.error('Complete task error:', error);
         res.status(500).json({ error: 'خطأ في إكمال المهمة' });
+    }
+});
+
+// الحصول على سعر الإعلان
+app.get('/api/tasks/ad-price', authenticate, async (req, res) => {
+    try {
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        res.json({ 
+            pricePer1000: settings?.adPricePer1000 || 100,
+            minViews: 1000,
+            maxViews: 100000
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب السعر' });
+    }
+});
+
+// إنشاء إعلان من المستخدم
+app.post('/api/tasks/create-ad', authenticate, async (req, res) => {
+    try {
+        const { name, description, image, url, targetViews } = req.body;
+        
+        if (!name || !url || !targetViews) {
+            return res.status(400).json({ error: 'الاسم والرابط وعدد المشاهدات مطلوبة' });
+        }
+        
+        if (targetViews < 1000) {
+            return res.status(400).json({ error: 'الحد الأدنى للمشاهدات 1000' });
+        }
+        
+        // حساب التكلفة
+        const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+        const pricePer1000 = settings?.adPricePer1000 || 100;
+        const totalCost = Math.ceil(targetViews / 1000) * pricePer1000;
+        
+        // التحقق من رصيد المستخدم
+        if (req.user.coins < totalCost) {
+            return res.status(400).json({ 
+                error: `رصيدك غير كافٍ. تحتاج ${totalCost} عملة`,
+                required: totalCost,
+                current: req.user.coins
+            });
+        }
+        
+        // خصم التكلفة
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { coins: { decrement: totalCost } }
+        });
+        
+        // إنشاء الإعلان
+        await prisma.$executeRaw`
+            INSERT INTO "task" (
+                "id", "name", "description", "image", "url", 
+                "reward", "duration", "cooldown", "isActive", "sortOrder",
+                "isUserAd", "userId", "targetViews", "currentViews", "totalCost", "createdAt"
+            ) VALUES (
+                gen_random_uuid()::text, ${name}, ${description || null}, ${image || null}, ${url},
+                5, 30, 24, true, 100,
+                true, ${req.user.id}, ${targetViews}, 0, ${totalCost}, NOW()
+            )
+        `;
+        
+        // إشعار
+        await createNotification(
+            req.user.id,
+            'ad',
+            '📢 تم إنشاء إعلانك!',
+            `إعلانك "${name}" نشط الآن وسيحصل على ${targetViews} مشاهدة`,
+            { targetViews, cost: totalCost }
+        );
+        
+        res.json({ 
+            success: true, 
+            message: 'تم إنشاء الإعلان بنجاح',
+            cost: totalCost,
+            targetViews
+        });
+    } catch (error) {
+        console.error('Create ad error:', error);
+        res.status(500).json({ error: 'خطأ في إنشاء الإعلان' });
+    }
+});
+
+// الحصول على إعلانات المستخدم
+app.get('/api/tasks/my-ads', authenticate, async (req, res) => {
+    try {
+        const ads = await prisma.$queryRaw`
+            SELECT * FROM "task" 
+            WHERE "userId" = ${req.user.id} AND "isUserAd" = true
+            ORDER BY "createdAt" DESC
+        `;
+        res.json(ads);
+    } catch (error) {
+        console.error('Get my ads error:', error);
+        res.status(500).json({ error: 'خطأ في جلب الإعلانات' });
     }
 });
 
