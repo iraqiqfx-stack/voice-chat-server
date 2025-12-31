@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
 import dotenv from 'dotenv';
+import { Resend } from 'resend';
 
 dotenv.config();
 
@@ -12,6 +13,12 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'windo-secret-key';
+
+// إعداد Resend لإرسال البريد الإلكتروني
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// تخزين OTP مؤقتاً في الذاكرة (يمكن استخدام Redis في الإنتاج)
+const otpStore = new Map(); // { email: { otp, expiresAt, userData } }
 
 // تحديد BASE_URL تلقائياً
 const getBaseUrl = () => {
@@ -103,6 +110,8 @@ async function runMigrations() {
                 "updatedAt" TIMESTAMP DEFAULT NOW()
             );
         `);
+        // Email verification field
+        await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isEmailVerified" BOOLEAN DEFAULT false;`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
@@ -341,7 +350,270 @@ async function createNotification(userId, type, title, message, data = null) {
 // 🔑 APIs المصادقة
 // ============================================================
 
-// تسجيل مستخدم جديد
+// دالة توليد OTP
+function generateOTP() {
+    return Math.floor(100000 + Math.random() * 900000).toString(); // 6 أرقام
+}
+
+// دالة إرسال OTP عبر البريد الإلكتروني
+async function sendOTPEmail(email, otp, username) {
+    try {
+        const { data, error } = await resend.emails.send({
+            from: 'Windo <onboarding@resend.dev>', // للاختبار - غيّر لدومينك في الإنتاج
+            to: email,
+            subject: '🔐 رمز التحقق - ويندو',
+            html: `
+                <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <div style="background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; border-radius: 16px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 28px;">ويندو</h1>
+                        <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">مرحباً ${username}!</p>
+                    </div>
+                    
+                    <div style="background: #1a1a2e; padding: 30px; border-radius: 16px; margin-top: 20px; text-align: center;">
+                        <p style="color: #9CA3AF; font-size: 16px; margin: 0 0 20px;">رمز التحقق الخاص بك هو:</p>
+                        
+                        <div style="background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 20px 40px; border-radius: 12px; display: inline-block;">
+                            <span style="color: white; font-size: 36px; font-weight: bold; letter-spacing: 8px;">${otp}</span>
+                        </div>
+                        
+                        <p style="color: #6B7280; font-size: 14px; margin: 20px 0 0;">
+                            ⏰ صالح لمدة 10 دقائق فقط
+                        </p>
+                        
+                        <p style="color: #EF4444; font-size: 13px; margin: 15px 0 0;">
+                            ⚠️ لا تشارك هذا الرمز مع أي شخص
+                        </p>
+                    </div>
+                    
+                    <p style="color: #6B7280; font-size: 12px; text-align: center; margin-top: 20px;">
+                        إذا لم تطلب هذا الرمز، تجاهل هذه الرسالة.
+                    </p>
+                </div>
+            `
+        });
+
+        if (error) {
+            console.error('Resend error:', error);
+            return false;
+        }
+        
+        console.log('✅ OTP sent to:', email, 'ID:', data?.id);
+        return true;
+    } catch (error) {
+        console.error('Send OTP error:', error);
+        return false;
+    }
+}
+
+// الخطوة 1: طلب التسجيل وإرسال OTP
+app.post('/api/auth/register/request-otp', async (req, res) => {
+    try {
+        const { username, email, password, referralCode } = req.body;
+        
+        if (!username || !email || !password) {
+            return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
+        }
+        
+        // التحقق من طول كلمة المرور
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+        }
+        
+        // التحقق من أن البريد Gmail فقط
+        const emailLower = email.toLowerCase().trim();
+        if (!emailLower.endsWith('@gmail.com')) {
+            return res.status(400).json({ error: 'يجب استخدام بريد Gmail فقط' });
+        }
+        
+        // التحقق من عدم وجود المستخدم
+        const existingUser = await prisma.user.findFirst({
+            where: { OR: [{ email: emailLower }, { username }] }
+        });
+        
+        if (existingUser) {
+            return res.status(400).json({ 
+                error: existingUser.email === emailLower ? 'البريد الإلكتروني مستخدم' : 'اسم المستخدم مستخدم' 
+            });
+        }
+        
+        // التحقق من عدم إرسال OTP مؤخراً (منع السبام)
+        const existingOTP = otpStore.get(emailLower);
+        if (existingOTP && existingOTP.expiresAt > Date.now() - 60000) { // دقيقة واحدة بين الطلبات
+            const waitTime = Math.ceil((existingOTP.expiresAt - Date.now() + 60000) / 1000 / 60);
+            return res.status(429).json({ error: `انتظر ${waitTime} دقيقة قبل طلب رمز جديد` });
+        }
+        
+        // توليد OTP
+        const otp = generateOTP();
+        const expiresAt = Date.now() + 10 * 60 * 1000; // 10 دقائق
+        
+        // تخزين البيانات مؤقتاً
+        otpStore.set(emailLower, {
+            otp,
+            expiresAt,
+            userData: { username, email: emailLower, password, referralCode }
+        });
+        
+        // إرسال OTP
+        const sent = await sendOTPEmail(emailLower, otp, username);
+        
+        if (!sent) {
+            otpStore.delete(emailLower);
+            return res.status(500).json({ error: 'فشل إرسال رمز التحقق، حاول مرة أخرى' });
+        }
+        
+        res.json({ 
+            success: true, 
+            message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
+            email: emailLower
+        });
+        
+    } catch (error) {
+        console.error('Request OTP error:', error);
+        res.status(500).json({ error: 'خطأ في إرسال رمز التحقق' });
+    }
+});
+
+// الخطوة 2: التحقق من OTP وإكمال التسجيل
+app.post('/api/auth/register/verify-otp', async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        
+        if (!email || !otp) {
+            return res.status(400).json({ error: 'البريد ورمز التحقق مطلوبان' });
+        }
+        
+        const emailLower = email.toLowerCase().trim();
+        const storedData = otpStore.get(emailLower);
+        
+        if (!storedData) {
+            return res.status(400).json({ error: 'لم يتم طلب رمز تحقق لهذا البريد' });
+        }
+        
+        // التحقق من انتهاء الصلاحية
+        if (storedData.expiresAt < Date.now()) {
+            otpStore.delete(emailLower);
+            return res.status(400).json({ error: 'انتهت صلاحية رمز التحقق، اطلب رمزاً جديداً' });
+        }
+        
+        // التحقق من صحة OTP
+        if (storedData.otp !== otp) {
+            return res.status(400).json({ error: 'رمز التحقق غير صحيح' });
+        }
+        
+        // حذف OTP من التخزين
+        otpStore.delete(emailLower);
+        
+        const { username, password, referralCode } = storedData.userData;
+        
+        // تشفير كلمة المرور
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // البحث عن المُحيل
+        let referrer = null;
+        if (referralCode) {
+            referrer = await prisma.user.findUnique({ where: { referralCode } });
+        }
+        
+        // إنشاء المستخدم
+        const user = await prisma.user.create({
+            data: {
+                username,
+                email: emailLower,
+                password: hashedPassword,
+                referralCode: generateReferralCode(),
+                referredBy: referrer?.id || null,
+                coins: 100,
+                gems: 10,
+                isEmailVerified: true // البريد مُتحقق منه
+            }
+        });
+        
+        // مكافأة المُحيل
+        if (referrer) {
+            const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
+            await prisma.user.update({
+                where: { id: referrer.id },
+                data: { gems: { increment: settings?.referralGems || 50 } }
+            });
+            await createNotification(
+                referrer.id,
+                'referral',
+                '🎉 عضو جديد في فريقك!',
+                `انضم ${username} لفريقك وحصلت على ${settings?.referralGems || 50} جوهرة`,
+                { newUserId: user.id, gems: settings?.referralGems || 50 }
+            );
+        }
+        
+        // إشعار ترحيبي
+        await createNotification(
+            user.id,
+            'system',
+            '🎊 أهلاً بك في ويندو!',
+            'حصلت على 100 عملة و 10 جواهر كهدية ترحيبية. استمتع بالتطبيق!',
+            { coins: 100, gems: 10 }
+        );
+        
+        // إنشاء التوكن
+        const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });
+        
+        const { password: _, ...userWithoutPassword } = user;
+        res.json({ user: userWithoutPassword, token });
+        
+    } catch (error) {
+        console.error('Verify OTP error:', error);
+        res.status(500).json({ error: 'خطأ في التحقق' });
+    }
+});
+
+// إعادة إرسال OTP
+app.post('/api/auth/register/resend-otp', async (req, res) => {
+    try {
+        const { email } = req.body;
+        
+        if (!email) {
+            return res.status(400).json({ error: 'البريد الإلكتروني مطلوب' });
+        }
+        
+        const emailLower = email.toLowerCase().trim();
+        const storedData = otpStore.get(emailLower);
+        
+        if (!storedData) {
+            return res.status(400).json({ error: 'لم يتم طلب تسجيل لهذا البريد' });
+        }
+        
+        // التحقق من مرور دقيقة على الأقل
+        const timeSinceLastOTP = Date.now() - (storedData.expiresAt - 10 * 60 * 1000);
+        if (timeSinceLastOTP < 60000) {
+            const waitTime = Math.ceil((60000 - timeSinceLastOTP) / 1000);
+            return res.status(429).json({ error: `انتظر ${waitTime} ثانية قبل إعادة الإرسال` });
+        }
+        
+        // توليد OTP جديد
+        const otp = generateOTP();
+        const expiresAt = Date.now() + 10 * 60 * 1000;
+        
+        // تحديث البيانات
+        storedData.otp = otp;
+        storedData.expiresAt = expiresAt;
+        otpStore.set(emailLower, storedData);
+        
+        // إرسال OTP
+        const sent = await sendOTPEmail(emailLower, otp, storedData.userData.username);
+        
+        if (!sent) {
+            return res.status(500).json({ error: 'فشل إرسال رمز التحقق' });
+        }
+        
+        res.json({ success: true, message: 'تم إعادة إرسال رمز التحقق' });
+        
+    } catch (error) {
+        console.error('Resend OTP error:', error);
+        res.status(500).json({ error: 'خطأ في إعادة الإرسال' });
+    }
+});
+
+// التسجيل القديم (للتوافق مع الإصدارات القديمة) - يمكن حذفه لاحقاً
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { username, email, password, referralCode } = req.body;
@@ -8388,6 +8660,62 @@ async function initHarvestReferralGems() {
     }
 }
 initHarvestReferralGems();
+
+// ============================================================
+// 🧹 تنظيف الحضور التلقائي (Presence Cleanup)
+// ============================================================
+// تنظيف المستخدمين الذين لم يحدثوا حضورهم منذ فترة
+// يعمل كل دقيقة لإزالة المستخدمين غير النشطين
+
+async function cleanupStalePresence() {
+    try {
+        // حذف الحضور الذي مر عليه أكثر من دقيقتين بدون تحديث
+        const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+        
+        // حذف من جدول RoomPresence (الضيوف)
+        const deletedGuests = await prisma.roomPresence.deleteMany({
+            where: {
+                lastSeen: { lt: twoMinutesAgo }
+            }
+        });
+        
+        // تحديث حالة الأعضاء غير النشطين
+        const updatedMembers = await prisma.roomMember.updateMany({
+            where: {
+                isOnline: true,
+                lastSeen: { lt: twoMinutesAgo }
+            },
+            data: { isOnline: false }
+        });
+        
+        // إفراغ المقاعد الصوتية للمستخدمين غير النشطين
+        const staleSeats = await prisma.voiceSeat.findMany({
+            where: {
+                odId: { not: null },
+                joinedAt: { lt: twoMinutesAgo }
+            }
+        });
+        
+        for (const seat of staleSeats) {
+            await prisma.voiceSeat.update({
+                where: { roomId_seatNumber: { roomId: seat.roomId, seatNumber: seat.seatNumber } },
+                data: { odId: null, joinedAt: null, isMuted: false }
+            });
+        }
+        
+        if (deletedGuests.count > 0 || updatedMembers.count > 0 || staleSeats.length > 0) {
+            console.log(`🧹 Cleanup: ${deletedGuests.count} guests, ${updatedMembers.count} members offline, ${staleSeats.length} seats cleared`);
+        }
+    } catch (error) {
+        console.error('Presence cleanup error:', error.message);
+    }
+}
+
+// تشغيل التنظيف كل دقيقة
+setInterval(cleanupStalePresence, 60 * 1000);
+
+// تشغيل التنظيف عند بدء السيرفر
+cleanupStalePresence();
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log('');
