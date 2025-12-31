@@ -490,12 +490,18 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
     try {
         const { email, otp } = req.body;
         
+        console.log('🔍 Verify OTP request:', { email, otp });
+        console.log('📦 OTP Store size:', otpStore.size);
+        
         if (!email || !otp) {
             return res.status(400).json({ error: 'البريد ورمز التحقق مطلوبان' });
         }
         
         const emailLower = email.toLowerCase().trim();
         const storedData = otpStore.get(emailLower);
+        
+        console.log('📧 Looking for:', emailLower);
+        console.log('💾 Stored data exists:', !!storedData);
         
         if (!storedData) {
             return res.status(400).json({ error: 'لم يتم طلب رمز تحقق لهذا البريد' });
@@ -506,6 +512,8 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
             otpStore.delete(emailLower);
             return res.status(400).json({ error: 'انتهت صلاحية رمز التحقق، اطلب رمزاً جديداً' });
         }
+        
+        console.log('🔐 Comparing OTP:', { stored: storedData.otp, received: otp });
         
         // التحقق من صحة OTP
         if (storedData.otp !== otp) {
