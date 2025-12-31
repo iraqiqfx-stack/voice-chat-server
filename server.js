@@ -533,7 +533,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
                 email: emailLower,
                 password: hashedPassword,
                 referralCode: generateReferralCode(),
-                referredBy: referrer?.id || null,
+                referrer: referrer ? { connect: { id: referrer.id } } : undefined,
                 coins: 100,
                 gems: 10,
                 isEmailVerified: true // البريد مُتحقق منه
@@ -666,7 +666,7 @@ app.post('/api/auth/register', async (req, res) => {
                 email: emailLower,
                 password: hashedPassword,
                 referralCode: generateReferralCode(),
-                referredBy: referrer?.id || null,
+                referrer: referrer ? { connect: { id: referrer.id } } : undefined,
                 coins: 100, // رصيد ترحيبي
                 gems: 10
             }
