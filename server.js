@@ -477,7 +477,9 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
         res.json({ 
             success: true, 
             message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
-            email: emailLower
+            email: emailLower,
+            // للاختبار فقط - احذف هذا في الإنتاج!
+            _debug_otp: process.env.NODE_ENV !== 'production' ? otp : undefined
         });
         
     } catch (error) {
