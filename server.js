@@ -14,8 +14,14 @@ const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'windo-secret-key';
 
-// إعداد Resend لإرسال البريد الإلكتروني
-const resend = new Resend(process.env.RESEND_API_KEY);
+// إعداد Resend لإرسال البريد الإلكتروني (اختياري)
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+    resend = new Resend(process.env.RESEND_API_KEY);
+    console.log('✅ Resend configured');
+} else {
+    console.log('⚠️ RESEND_API_KEY not set - OTP emails disabled');
+}
 
 // تخزين OTP مؤقتاً في الذاكرة (يمكن استخدام Redis في الإنتاج)
 const otpStore = new Map(); // { email: { otp, expiresAt, userData } }
@@ -357,6 +363,12 @@ function generateOTP() {
 
 // دالة إرسال OTP عبر البريد الإلكتروني
 async function sendOTPEmail(email, otp, username) {
+    // إذا لم يكن Resend مُعداً، اطبع OTP في الـ console فقط
+    if (!resend) {
+        console.log('📧 OTP for', email, ':', otp);
+        return true; // نعتبره ناجح للاختبار
+    }
+    
     try {
         const { data, error } = await resend.emails.send({
             from: 'Windo <onboarding@resend.dev>', // للاختبار - غيّر لدومينك في الإنتاج
