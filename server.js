@@ -364,7 +364,7 @@ async function sendOTPEmail(email, otp, username) {
         console.log('📤 Attempting to send OTP to:', email);
         
         const { data, error } = await resend.emails.send({
-            from: 'Windo <onboarding@resend.dev>',
+            from: 'Windo <noreply@iqfx.shop>',
             to: email,
             subject: '🔐 رمز التحقق - ويندو',
             html: `
