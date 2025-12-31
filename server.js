@@ -527,18 +527,22 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         }
         
         // إنشاء المستخدم
-        const user = await prisma.user.create({
-            data: {
-                username,
-                email: emailLower,
-                password: hashedPassword,
-                referralCode: generateReferralCode(),
-                referrer: referrer ? { connect: { id: referrer.id } } : undefined,
-                coins: 100,
-                gems: 10,
-                isEmailVerified: true // البريد مُتحقق منه
-            }
-        });
+        const userData = {
+            username,
+            email: emailLower,
+            password: hashedPassword,
+            referralCode: generateReferralCode(),
+            coins: 100,
+            gems: 10,
+            isEmailVerified: true
+        };
+        
+        // إضافة المُحيل إذا وُجد
+        if (referrer) {
+            userData.referrer = { connect: { id: referrer.id } };
+        }
+        
+        const user = await prisma.user.create({ data: userData });
         
         // مكافأة المُحيل
         if (referrer) {
@@ -660,17 +664,20 @@ app.post('/api/auth/register', async (req, res) => {
         }
         
         // إنشاء المستخدم
-        const user = await prisma.user.create({
-            data: {
-                username,
-                email: emailLower,
-                password: hashedPassword,
-                referralCode: generateReferralCode(),
-                referrer: referrer ? { connect: { id: referrer.id } } : undefined,
-                coins: 100, // رصيد ترحيبي
-                gems: 10
-            }
-        });
+        const userData = {
+            username,
+            email: emailLower,
+            password: hashedPassword,
+            referralCode: generateReferralCode(),
+            coins: 100,
+            gems: 10
+        };
+        
+        if (referrer) {
+            userData.referrer = { connect: { id: referrer.id } };
+        }
+        
+        const user = await prisma.user.create({ data: userData });
         
         // مكافأة المُحيل
         if (referrer) {

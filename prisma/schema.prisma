@@ -28,6 +28,7 @@ model User {
   isAdmin       Boolean  @default(false)  // هل المستخدم مدير
   isBanned      Boolean  @default(false)  // هل المستخدم محظور
   banReason     String?                   // سبب الحظر
+  isEmailVerified Boolean @default(false) // هل البريد مُتحقق منه
   lastSeen      DateTime @default(now())
   createdAt     DateTime @default(now())
   
