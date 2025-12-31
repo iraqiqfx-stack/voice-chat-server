@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { PrismaClient, Prisma } from '@prisma/client';
 import dotenv from 'dotenv';
 import { Resend } from 'resend';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -179,6 +180,30 @@ const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
+
+// إعداد multer لرفع الملفات
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const ext = file.originalname.split('.').pop();
+        const filename = `${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+        cb(null, filename);
+    }
+});
+
+const upload = multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('يجب أن يكون الملف صورة'));
+        }
+    }
+});
 
 // زيادة حجم الطلب للصور
 app.use(express.json({ limit: '10mb' }));
@@ -8193,6 +8218,26 @@ app.post('/api/upload', authenticate, async (req, res) => {
         });
     } catch (error) {
         console.error('Upload error:', error);
+        res.status(500).json({ error: 'فشل في رفع الصورة' });
+    }
+});
+
+// رفع صورة (Multipart/Form-Data) - للأدمن
+app.post('/api/upload/file', authenticate, upload.single('image'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'الصورة مطلوبة' });
+        }
+        
+        const imageUrl = `${BASE_URL}/uploads/${req.file.filename}`;
+        
+        res.json({ 
+            success: true, 
+            url: imageUrl,
+            filename: req.file.filename 
+        });
+    } catch (error) {
+        console.error('File upload error:', error);
         res.status(500).json({ error: 'فشل في رفع الصورة' });
     }
 });
