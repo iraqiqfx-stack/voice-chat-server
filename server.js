@@ -8840,8 +8840,10 @@ async function initTasksTable() {
         await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "targetViews" INTEGER DEFAULT 0;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "currentViews" INTEGER DEFAULT 0;`);
         await prisma.$executeRawUnsafe(`ALTER TABLE "task" ADD COLUMN IF NOT EXISTS "totalCost" DOUBLE PRECISION DEFAULT 0;`);
-        // إضافة سعر الإعلانات في الإعدادات
+        // إضافة إعدادات الإعلانات
         await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "adPricePer1000" DOUBLE PRECISION DEFAULT 100;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "adViewReward" DOUBLE PRECISION DEFAULT 5;`);
+        await prisma.$executeRawUnsafe(`ALTER TABLE "AppSettings" ADD COLUMN IF NOT EXISTS "adViewDuration" INTEGER DEFAULT 30;`);
         await prisma.$executeRawUnsafe(`
             CREATE TABLE IF NOT EXISTS "task_completion" (
                 "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -9003,6 +9005,8 @@ app.get('/api/tasks/ad-price', authenticate, async (req, res) => {
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
         res.json({ 
             pricePer1000: settings?.adPricePer1000 || 100,
+            viewReward: settings?.adViewReward || 5,
+            viewDuration: settings?.adViewDuration || 30,
             minViews: 1000,
             maxViews: 100000
         });
@@ -9024,9 +9028,11 @@ app.post('/api/tasks/create-ad', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'الحد الأدنى للمشاهدات 1000' });
         }
         
-        // حساب التكلفة
+        // جلب الإعدادات
         const settings = await prisma.appSettings.findUnique({ where: { id: 'settings' } });
         const pricePer1000 = settings?.adPricePer1000 || 100;
+        const viewReward = settings?.adViewReward || 5;
+        const viewDuration = settings?.adViewDuration || 30;
         const totalCost = Math.ceil(targetViews / 1000) * pricePer1000;
         
         // التحقق من رصيد المستخدم
@@ -9044,7 +9050,7 @@ app.post('/api/tasks/create-ad', authenticate, async (req, res) => {
             data: { coins: { decrement: totalCost } }
         });
         
-        // إنشاء الإعلان
+        // إنشاء الإعلان مع الإعدادات
         await prisma.$executeRaw`
             INSERT INTO "task" (
                 "id", "name", "description", "image", "url", 
@@ -9052,7 +9058,7 @@ app.post('/api/tasks/create-ad', authenticate, async (req, res) => {
                 "isUserAd", "userId", "targetViews", "currentViews", "totalCost", "createdAt"
             ) VALUES (
                 gen_random_uuid()::text, ${name}, ${description || null}, ${image || null}, ${url},
-                5, 30, 24, true, 100,
+                ${viewReward}, ${viewDuration}, 24, true, 100,
                 true, ${req.user.id}, ${targetViews}, 0, ${totalCost}, NOW()
             )
         `;
