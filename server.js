@@ -520,6 +520,8 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
             return res.status(400).json({ error: 'رمز التحقق غير صحيح' });
         }
         
+        console.log('✅ OTP verified successfully, creating user...');
+        
         // حذف OTP من التخزين
         otpStore.delete(emailLower);
         
@@ -532,6 +534,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         let referrer = null;
         if (referralCode) {
             referrer = await prisma.user.findUnique({ where: { referralCode } });
+            console.log('👤 Referrer found:', referrer ? referrer.username : 'none');
         }
         
         // إنشاء المستخدم
@@ -550,7 +553,11 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
             userData.referrer = { connect: { id: referrer.id } };
         }
         
+        console.log('📝 Creating user with data:', { ...userData, password: '[hidden]' });
+        
         const user = await prisma.user.create({ data: userData });
+        
+        console.log('✅ User created:', user.id);
         
         // مكافأة المُحيل
         if (referrer) {
