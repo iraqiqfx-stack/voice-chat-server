@@ -588,6 +588,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '30d' });
         
         const { password: _, ...userWithoutPassword } = user;
+        console.log('🎉 Registration complete, sending response...');
         res.json({ user: userWithoutPassword, token });
         
     } catch (error) {
