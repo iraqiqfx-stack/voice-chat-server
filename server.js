@@ -423,6 +423,17 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
             return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
         }
         
+        // التحقق من كود الدعوة (مطلوب)
+        if (!referralCode) {
+            return res.status(400).json({ error: 'كود الدعوة مطلوب' });
+        }
+        
+        // التحقق من صحة كود الدعوة
+        const referrer = await prisma.user.findUnique({ where: { referralCode } });
+        if (!referrer) {
+            return res.status(400).json({ error: 'كود الدعوة غير صحيح' });
+        }
+        
         // التحقق من طول كلمة المرور
         if (password.length < 6) {
             return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
