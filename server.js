@@ -8976,7 +8976,7 @@ app.get('/api/admin/tasks', authenticate, async (req, res) => {
         
         const tasks = await prisma.$queryRaw`
             SELECT t.*, 
-                   (SELECT COUNT(*) FROM "task_completion" WHERE "taskId" = t.id) as "completionCount"
+                   (SELECT COUNT(*)::int FROM "task_completion" WHERE "taskId" = t.id) as "completionCount"
             FROM "task" t
             ORDER BY t."sortOrder" ASC, t."createdAt" DESC
         `;
