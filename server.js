@@ -8762,6 +8762,264 @@ setInterval(cleanupStalePresence, 60 * 1000);
 // تشغيل التنظيف عند بدء السيرفر
 cleanupStalePresence();
 
+// ============================================================
+// 📋 APIs المهام (Tasks)
+// ============================================================
+
+// إنشاء جدول المهام إذا لم يكن موجوداً
+async function initTasksTable() {
+    try {
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "task" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "name" TEXT NOT NULL,
+                "description" TEXT,
+                "image" TEXT,
+                "url" TEXT NOT NULL,
+                "reward" DOUBLE PRECISION DEFAULT 10,
+                "duration" INTEGER DEFAULT 30,
+                "cooldown" INTEGER DEFAULT 24,
+                "isActive" BOOLEAN DEFAULT true,
+                "sortOrder" INTEGER DEFAULT 0,
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "task_completion" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "taskId" TEXT NOT NULL,
+                "userId" TEXT NOT NULL,
+                "completedAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "task_completion_taskId_idx" ON "task_completion"("taskId");`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "task_completion_userId_idx" ON "task_completion"("userId");`);
+        console.log('✅ Tasks table initialized');
+    } catch (error) {
+        console.log('⚠️ Tasks table init:', error.message);
+    }
+}
+initTasksTable();
+
+// الحصول على جميع المهام (للمستخدم)
+app.get('/api/tasks', authenticate, async (req, res) => {
+    try {
+        const tasks = await prisma.$queryRaw`
+            SELECT * FROM "task" WHERE "isActive" = true ORDER BY "sortOrder" ASC, "createdAt" DESC
+        `;
+        
+        // الحصول على آخر إكمال لكل مهمة للمستخدم
+        const completions = await prisma.$queryRaw`
+            SELECT "taskId", MAX("completedAt") as "lastCompleted"
+            FROM "task_completion"
+            WHERE "userId" = ${req.user.id}
+            GROUP BY "taskId"
+        `;
+        
+        const completionMap = {};
+        completions.forEach(c => {
+            completionMap[c.taskId] = c.lastCompleted;
+        });
+        
+        // إضافة معلومات الإكمال لكل مهمة
+        const tasksWithStatus = tasks.map(task => {
+            const lastCompleted = completionMap[task.id];
+            let canComplete = true;
+            let nextAvailable = null;
+            
+            if (lastCompleted) {
+                const cooldownMs = task.cooldown * 60 * 60 * 1000; // تحويل الساعات لميلي ثانية
+                const nextTime = new Date(lastCompleted).getTime() + cooldownMs;
+                if (Date.now() < nextTime) {
+                    canComplete = false;
+                    nextAvailable = new Date(nextTime);
+                }
+            }
+            
+            return {
+                ...task,
+                canComplete,
+                nextAvailable,
+                lastCompleted
+            };
+        });
+        
+        res.json(tasksWithStatus);
+    } catch (error) {
+        console.error('Get tasks error:', error);
+        res.status(500).json({ error: 'خطأ في جلب المهام' });
+    }
+});
+
+// إكمال مهمة والحصول على المكافأة
+app.post('/api/tasks/:taskId/complete', authenticate, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        
+        // التحقق من وجود المهمة
+        const tasks = await prisma.$queryRaw`
+            SELECT * FROM "task" WHERE "id" = ${taskId} AND "isActive" = true
+        `;
+        
+        if (tasks.length === 0) {
+            return res.status(404).json({ error: 'المهمة غير موجودة' });
+        }
+        
+        const task = tasks[0];
+        
+        // التحقق من فترة الانتظار
+        const lastCompletion = await prisma.$queryRaw`
+            SELECT * FROM "task_completion"
+            WHERE "taskId" = ${taskId} AND "userId" = ${req.user.id}
+            ORDER BY "completedAt" DESC
+            LIMIT 1
+        `;
+        
+        if (lastCompletion.length > 0) {
+            const cooldownMs = task.cooldown * 60 * 60 * 1000;
+            const nextTime = new Date(lastCompletion[0].completedAt).getTime() + cooldownMs;
+            if (Date.now() < nextTime) {
+                const remainingHours = Math.ceil((nextTime - Date.now()) / (60 * 60 * 1000));
+                return res.status(400).json({ 
+                    error: `يجب الانتظار ${remainingHours} ساعة قبل إعادة هذه المهمة` 
+                });
+            }
+        }
+        
+        // تسجيل الإكمال
+        await prisma.$executeRaw`
+            INSERT INTO "task_completion" ("id", "taskId", "userId", "completedAt")
+            VALUES (gen_random_uuid()::text, ${taskId}, ${req.user.id}, NOW())
+        `;
+        
+        // إضافة المكافأة
+        await prisma.user.update({
+            where: { id: req.user.id },
+            data: { gems: { increment: task.reward } }
+        });
+        
+        // إشعار
+        await createNotification(
+            req.user.id,
+            'task',
+            '🎯 مهمة مكتملة!',
+            `أكملت مهمة "${task.name}" وحصلت على ${task.reward} جوهرة`,
+            { taskId, reward: task.reward }
+        );
+        
+        res.json({ 
+            success: true, 
+            reward: task.reward,
+            message: `حصلت على ${task.reward} جوهرة!`
+        });
+    } catch (error) {
+        console.error('Complete task error:', error);
+        res.status(500).json({ error: 'خطأ في إكمال المهمة' });
+    }
+});
+
+// ============================================================
+// 📋 APIs إدارة المهام (Admin)
+// ============================================================
+
+// الحصول على جميع المهام (للأدمن)
+app.get('/api/admin/tasks', authenticate, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح' });
+        }
+        
+        const tasks = await prisma.$queryRaw`
+            SELECT t.*, 
+                   (SELECT COUNT(*) FROM "task_completion" WHERE "taskId" = t.id) as "completionCount"
+            FROM "task" t
+            ORDER BY t."sortOrder" ASC, t."createdAt" DESC
+        `;
+        
+        res.json(tasks);
+    } catch (error) {
+        console.error('Admin get tasks error:', error);
+        res.status(500).json({ error: 'خطأ في جلب المهام' });
+    }
+});
+
+// إنشاء مهمة جديدة
+app.post('/api/admin/tasks', authenticate, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح' });
+        }
+        
+        const { name, description, image, url, reward, duration, cooldown, sortOrder } = req.body;
+        
+        if (!name || !url) {
+            return res.status(400).json({ error: 'الاسم والرابط مطلوبان' });
+        }
+        
+        await prisma.$executeRaw`
+            INSERT INTO "task" ("id", "name", "description", "image", "url", "reward", "duration", "cooldown", "sortOrder", "isActive", "createdAt")
+            VALUES (gen_random_uuid()::text, ${name}, ${description || null}, ${image || null}, ${url}, ${reward || 10}, ${duration || 30}, ${cooldown || 24}, ${sortOrder || 0}, true, NOW())
+        `;
+        
+        res.json({ success: true, message: 'تم إنشاء المهمة بنجاح' });
+    } catch (error) {
+        console.error('Create task error:', error);
+        res.status(500).json({ error: 'خطأ في إنشاء المهمة' });
+    }
+});
+
+// تحديث مهمة
+app.put('/api/admin/tasks/:taskId', authenticate, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح' });
+        }
+        
+        const { taskId } = req.params;
+        const { name, description, image, url, reward, duration, cooldown, isActive, sortOrder } = req.body;
+        
+        await prisma.$executeRaw`
+            UPDATE "task" SET
+                "name" = COALESCE(${name}, "name"),
+                "description" = ${description},
+                "image" = ${image},
+                "url" = COALESCE(${url}, "url"),
+                "reward" = COALESCE(${reward}, "reward"),
+                "duration" = COALESCE(${duration}, "duration"),
+                "cooldown" = COALESCE(${cooldown}, "cooldown"),
+                "isActive" = COALESCE(${isActive}, "isActive"),
+                "sortOrder" = COALESCE(${sortOrder}, "sortOrder")
+            WHERE "id" = ${taskId}
+        `;
+        
+        res.json({ success: true, message: 'تم تحديث المهمة بنجاح' });
+    } catch (error) {
+        console.error('Update task error:', error);
+        res.status(500).json({ error: 'خطأ في تحديث المهمة' });
+    }
+});
+
+// حذف مهمة
+app.delete('/api/admin/tasks/:taskId', authenticate, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح' });
+        }
+        
+        const { taskId } = req.params;
+        
+        // حذف سجلات الإكمال أولاً
+        await prisma.$executeRaw`DELETE FROM "task_completion" WHERE "taskId" = ${taskId}`;
+        // حذف المهمة
+        await prisma.$executeRaw`DELETE FROM "task" WHERE "id" = ${taskId}`;
+        
+        res.json({ success: true, message: 'تم حذف المهمة بنجاح' });
+    } catch (error) {
+        console.error('Delete task error:', error);
+        res.status(500).json({ error: 'خطأ في حذف المهمة' });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');

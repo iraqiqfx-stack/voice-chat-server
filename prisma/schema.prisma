@@ -599,3 +599,36 @@ model DirectMessage {
   @@index([senderId])
   @@map("direct_message")
 }
+
+
+// =================== نظام المهام ===================
+model Task {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  image       String?
+  url         String   // الرابط الذي يفتح عند الضغط على المهمة
+  reward      Float    @default(10) // مكافأة الجواهر
+  duration    Int      @default(30) // المدة بالثواني التي يجب أن يبقى فيها المستخدم
+  cooldown    Int      @default(24) // فترة الانتظار بالساعات قبل إعادة المهمة
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  
+  completions TaskCompletion[]
+  
+  @@map("task")
+}
+
+model TaskCompletion {
+  id          String   @id @default(uuid())
+  taskId      String
+  userId      String
+  completedAt DateTime @default(now())
+  
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_completion")
+}
