@@ -329,9 +329,56 @@ const authenticate = async (req, res, next) => {
         }
         
         req.user = user;
+        req.tokenIssuedAt = decoded.iat; // حفظ وقت إصدار التوكن
         next();
     } catch (error) {
         res.status(401).json({ error: 'توكن غير صالح' });
+    }
+};
+
+// ============================================================
+// 🛡️ Middleware للتحقق من صلاحيات الأدمن
+// ============================================================
+const authenticateAdmin = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization?.replace('Bearer ', '');
+        if (!token) {
+            return res.status(401).json({ error: 'غير مصرح - يرجى تسجيل الدخول' });
+        }
+        
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+        
+        if (!user) {
+            return res.status(401).json({ error: 'المستخدم غير موجود' });
+        }
+        
+        // التحقق من صلاحيات الأدمن
+        if (!user.isAdmin) {
+            return res.status(403).json({ error: 'غير مصرح - صلاحيات الأدمن مطلوبة' });
+        }
+        
+        // التحقق من أن التوكن صدر بعد آخر تغيير لكلمة المرور
+        if (user.passwordChangedAt) {
+            const passwordChangedTimestamp = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
+            if (decoded.iat < passwordChangedTimestamp) {
+                return res.status(401).json({ error: 'تم تغيير كلمة المرور - يرجى تسجيل الدخول مرة أخرى' });
+            }
+        }
+        
+        // التحقق من حظر المستخدم
+        if (user.isBanned) {
+            return res.status(403).json({ 
+                error: 'تم حظر حسابك',
+                banned: true,
+                reason: user.banReason || 'مخالفة شروط الاستخدام'
+            });
+        }
+        
+        req.user = user;
+        next();
+    } catch (error) {
+        res.status(401).json({ error: 'توكن غير صالح أو منتهي الصلاحية' });
     }
 };
 
@@ -7298,7 +7345,7 @@ app.get('/api/dm/unread-count', authenticate, async (req, res) => {
 // ============================================================
 
 // إحصائيات لوحة التحكم
-app.get('/api/admin/stats', authenticate, async (req, res) => {
+app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
     try {
         const [totalUsers, totalRooms, totalPosts, pendingWithdrawals, totalGifts] = await Promise.all([
             prisma.user.count(),
@@ -7333,7 +7380,7 @@ app.get('/api/admin/stats', authenticate, async (req, res) => {
 });
 
 // جلب المستخدمين
-app.get('/api/admin/users', authenticate, async (req, res) => {
+app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = 20;
@@ -7398,7 +7445,7 @@ app.get('/api/admin/users', authenticate, async (req, res) => {
 });
 
 // تحديث مستخدم
-app.put('/api/admin/users/:id', authenticate, async (req, res) => {
+app.put('/api/admin/users/:id', authenticateAdmin, async (req, res) => {
     try {
         const { coins, gems, level, isRestricted } = req.body;
         const user = await prisma.user.update({
@@ -7412,7 +7459,7 @@ app.put('/api/admin/users/:id', authenticate, async (req, res) => {
 });
 
 // حذف مستخدم
-app.delete('/api/admin/users/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/users/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.user.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -7422,7 +7469,7 @@ app.delete('/api/admin/users/:id', authenticate, async (req, res) => {
 });
 
 // حظر مستخدم
-app.post('/api/admin/users/:id/ban', authenticate, async (req, res) => {
+app.post('/api/admin/users/:id/ban', authenticateAdmin, async (req, res) => {
     try {
         const { reason } = req.body;
         const user = await prisma.user.update({
@@ -7441,7 +7488,7 @@ app.post('/api/admin/users/:id/ban', authenticate, async (req, res) => {
 });
 
 // إلغاء حظر مستخدم
-app.post('/api/admin/users/:id/unban', authenticate, async (req, res) => {
+app.post('/api/admin/users/:id/unban', authenticateAdmin, async (req, res) => {
     try {
         const user = await prisma.user.update({
             where: { id: req.params.id },
@@ -7459,7 +7506,7 @@ app.post('/api/admin/users/:id/unban', authenticate, async (req, res) => {
 });
 
 // جلب الغرف
-app.get('/api/admin/rooms', authenticate, async (req, res) => {
+app.get('/api/admin/rooms', authenticateAdmin, async (req, res) => {
     try {
         const search = req.query.search || '';
         const where = search ? {
@@ -7481,7 +7528,7 @@ app.get('/api/admin/rooms', authenticate, async (req, res) => {
 });
 
 // حذف غرفة
-app.delete('/api/admin/rooms/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/rooms/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.chatRoom.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -7491,7 +7538,7 @@ app.delete('/api/admin/rooms/:id', authenticate, async (req, res) => {
 });
 
 // جلب المنشورات
-app.get('/api/admin/posts', authenticate, async (req, res) => {
+app.get('/api/admin/posts', authenticateAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = 20;
@@ -7509,7 +7556,7 @@ app.get('/api/admin/posts', authenticate, async (req, res) => {
 });
 
 // حذف منشور
-app.delete('/api/admin/posts/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/posts/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.post.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -7519,7 +7566,7 @@ app.delete('/api/admin/posts/:id', authenticate, async (req, res) => {
 });
 
 // جلب السحوبات
-app.get('/api/admin/withdrawals', authenticate, async (req, res) => {
+app.get('/api/admin/withdrawals', authenticateAdmin, async (req, res) => {
     try {
         const status = req.query.status;
         
@@ -7595,7 +7642,7 @@ app.get('/api/admin/withdrawals', authenticate, async (req, res) => {
 });
 
 // الموافقة على سحب
-app.post('/api/admin/withdrawals/:id/approve', authenticate, async (req, res) => {
+app.post('/api/admin/withdrawals/:id/approve', authenticateAdmin, async (req, res) => {
     try {
         await prisma.withdrawRequest.update({
             where: { id: req.params.id },
@@ -7608,7 +7655,7 @@ app.post('/api/admin/withdrawals/:id/approve', authenticate, async (req, res) =>
 });
 
 // رفض سحب
-app.post('/api/admin/withdrawals/:id/reject', authenticate, async (req, res) => {
+app.post('/api/admin/withdrawals/:id/reject', authenticateAdmin, async (req, res) => {
     try {
         await prisma.withdrawRequest.update({
             where: { id: req.params.id },
@@ -7621,7 +7668,7 @@ app.post('/api/admin/withdrawals/:id/reject', authenticate, async (req, res) => 
 });
 
 // جلب الوكلاء
-app.get('/api/admin/agents', authenticate, async (req, res) => {
+app.get('/api/admin/agents', authenticateAdmin, async (req, res) => {
     try {
         const agents = await prisma.agent.findMany();
         res.json(agents);
@@ -7631,7 +7678,7 @@ app.get('/api/admin/agents', authenticate, async (req, res) => {
 });
 
 // إضافة وكيل
-app.post('/api/admin/agents', authenticate, async (req, res) => {
+app.post('/api/admin/agents', authenticateAdmin, async (req, res) => {
     try {
         const agent = await prisma.agent.create({ data: req.body });
         res.json(agent);
@@ -7641,7 +7688,7 @@ app.post('/api/admin/agents', authenticate, async (req, res) => {
 });
 
 // تحديث وكيل
-app.put('/api/admin/agents/:id', authenticate, async (req, res) => {
+app.put('/api/admin/agents/:id', authenticateAdmin, async (req, res) => {
     try {
         const agent = await prisma.agent.update({ where: { id: req.params.id }, data: req.body });
         res.json(agent);
@@ -7651,7 +7698,7 @@ app.put('/api/admin/agents/:id', authenticate, async (req, res) => {
 });
 
 // حذف وكيل
-app.delete('/api/admin/agents/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/agents/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.agent.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -7717,7 +7764,7 @@ app.get('/api/deposits/my', authenticate, async (req, res) => {
 });
 
 // جلب طلبات الإيداع (للأدمن)
-app.get('/api/admin/deposits', authenticate, async (req, res) => {
+app.get('/api/admin/deposits', authenticateAdmin, async (req, res) => {
     try {
         const status = req.query.status || 'all';
         let deposits;
@@ -7747,7 +7794,7 @@ app.get('/api/admin/deposits', authenticate, async (req, res) => {
 });
 
 // الموافقة على طلب إيداع
-app.post('/api/admin/deposits/:id/approve', authenticate, async (req, res) => {
+app.post('/api/admin/deposits/:id/approve', authenticateAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { coinsToAdd, gemsToAdd, note } = req.body;
@@ -7804,7 +7851,7 @@ app.post('/api/admin/deposits/:id/approve', authenticate, async (req, res) => {
 });
 
 // رفض طلب إيداع
-app.post('/api/admin/deposits/:id/reject', authenticate, async (req, res) => {
+app.post('/api/admin/deposits/:id/reject', authenticateAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { reason } = req.body;
@@ -7848,7 +7895,7 @@ app.post('/api/admin/deposits/:id/reject', authenticate, async (req, res) => {
 });
 
 // حذف طلب إيداع
-app.delete('/api/admin/deposits/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/deposits/:id', authenticateAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         await prisma.$executeRaw`DELETE FROM "deposit_request" WHERE id = ${id}`;
@@ -7862,7 +7909,7 @@ app.delete('/api/admin/deposits/:id', authenticate, async (req, res) => {
 // ============ طرق السحب (Payment Methods) ============
 
 // جلب طرق السحب
-app.get('/api/admin/payment-methods', authenticate, async (req, res) => {
+app.get('/api/admin/payment-methods', authenticateAdmin, async (req, res) => {
     try {
         const methods = await prisma.$queryRaw`SELECT * FROM "PaymentMethod" ORDER BY "createdAt" ASC`;
         res.json(methods);
@@ -7873,7 +7920,7 @@ app.get('/api/admin/payment-methods', authenticate, async (req, res) => {
 });
 
 // إضافة طريقة سحب
-app.post('/api/admin/payment-methods', authenticate, async (req, res) => {
+app.post('/api/admin/payment-methods', authenticateAdmin, async (req, res) => {
     try {
         const { name, icon, minAmount, maxAmount, fee, isActive } = req.body;
         const id = crypto.randomUUID();
@@ -7890,7 +7937,7 @@ app.post('/api/admin/payment-methods', authenticate, async (req, res) => {
 });
 
 // تحديث طريقة سحب
-app.put('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
+app.put('/api/admin/payment-methods/:id', authenticateAdmin, async (req, res) => {
     try {
         const { name, icon, minAmount, maxAmount, fee, isActive } = req.body;
         await prisma.$executeRaw`
@@ -7908,7 +7955,7 @@ app.put('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
 });
 
 // حذف طريقة سحب
-app.delete('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/payment-methods/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.$executeRaw`DELETE FROM "PaymentMethod" WHERE "id" = ${req.params.id}`;
         res.json({ success: true });
@@ -7921,7 +7968,7 @@ app.delete('/api/admin/payment-methods/:id', authenticate, async (req, res) => {
 // ============ المستخدمين المسموح لهم بالتحويل ============
 
 // جلب المستخدمين المسموح لهم
-app.get('/api/admin/allowed-transfers', authenticate, async (req, res) => {
+app.get('/api/admin/allowed-transfers', authenticateAdmin, async (req, res) => {
     try {
         const allowed = await prisma.$queryRaw`
             SELECT a."id", a."email", a."userId", a."createdAt",
@@ -7952,7 +7999,7 @@ app.get('/api/admin/allowed-transfers', authenticate, async (req, res) => {
 });
 
 // إضافة مستخدم للمسموح لهم بالتحويل (بالبريد الإلكتروني)
-app.post('/api/admin/allowed-transfers', authenticate, async (req, res) => {
+app.post('/api/admin/allowed-transfers', authenticateAdmin, async (req, res) => {
     try {
         const { email } = req.body;
         
@@ -7989,7 +8036,7 @@ app.post('/api/admin/allowed-transfers', authenticate, async (req, res) => {
 });
 
 // حذف مستخدم من المسموح لهم
-app.delete('/api/admin/allowed-transfers/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/allowed-transfers/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.$executeRaw`DELETE FROM "AllowedTransfer" WHERE "id" = ${req.params.id}`;
         res.json({ success: true });
@@ -7999,7 +8046,7 @@ app.delete('/api/admin/allowed-transfers/:id', authenticate, async (req, res) =>
 });
 
 // جلب سجل التحويلات (Admin)
-app.get('/api/admin/transfers', authenticate, async (req, res) => {
+app.get('/api/admin/transfers', authenticateAdmin, async (req, res) => {
     try {
         const transfers = await prisma.$queryRaw`
             SELECT 
@@ -8039,7 +8086,7 @@ app.get('/api/admin/transfers', authenticate, async (req, res) => {
 });
 
 // جلب الباقات (Admin)
-app.get('/api/admin/packages', authenticate, async (req, res) => {
+app.get('/api/admin/packages', authenticateAdmin, async (req, res) => {
     try {
         const packages = await prisma.package.findMany({ orderBy: { price: 'asc' } });
         res.json(packages);
@@ -8049,7 +8096,7 @@ app.get('/api/admin/packages', authenticate, async (req, res) => {
 });
 
 // إضافة باقة
-app.post('/api/admin/packages', authenticate, async (req, res) => {
+app.post('/api/admin/packages', authenticateAdmin, async (req, res) => {
     try {
         const pkg = await prisma.package.create({ data: req.body });
         res.json(pkg);
@@ -8059,7 +8106,7 @@ app.post('/api/admin/packages', authenticate, async (req, res) => {
 });
 
 // تحديث باقة
-app.put('/api/admin/packages/:id', authenticate, async (req, res) => {
+app.put('/api/admin/packages/:id', authenticateAdmin, async (req, res) => {
     try {
         const pkg = await prisma.package.update({ where: { id: req.params.id }, data: req.body });
         res.json(pkg);
@@ -8069,7 +8116,7 @@ app.put('/api/admin/packages/:id', authenticate, async (req, res) => {
 });
 
 // حذف باقة
-app.delete('/api/admin/packages/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/packages/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.package.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -8079,7 +8126,7 @@ app.delete('/api/admin/packages/:id', authenticate, async (req, res) => {
 });
 
 // جلب الهدايا (Admin)
-app.get('/api/admin/gifts', authenticate, async (req, res) => {
+app.get('/api/admin/gifts', authenticateAdmin, async (req, res) => {
     try {
         const gifts = await prisma.gift.findMany({ orderBy: { price: 'asc' } });
         res.json(gifts);
@@ -8089,7 +8136,7 @@ app.get('/api/admin/gifts', authenticate, async (req, res) => {
 });
 
 // إضافة هدية
-app.post('/api/admin/gifts', authenticate, async (req, res) => {
+app.post('/api/admin/gifts', authenticateAdmin, async (req, res) => {
     try {
         const gift = await prisma.gift.create({ data: req.body });
         res.json(gift);
@@ -8099,7 +8146,7 @@ app.post('/api/admin/gifts', authenticate, async (req, res) => {
 });
 
 // تحديث هدية
-app.put('/api/admin/gifts/:id', authenticate, async (req, res) => {
+app.put('/api/admin/gifts/:id', authenticateAdmin, async (req, res) => {
     try {
         const gift = await prisma.gift.update({ where: { id: req.params.id }, data: req.body });
         res.json(gift);
@@ -8109,7 +8156,7 @@ app.put('/api/admin/gifts/:id', authenticate, async (req, res) => {
 });
 
 // حذف هدية
-app.delete('/api/admin/gifts/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/gifts/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.gift.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -8123,7 +8170,7 @@ app.delete('/api/admin/gifts/:id', authenticate, async (req, res) => {
 // ============================================================
 
 // جلب جوائز العجلة
-app.get('/api/admin/wheel-prizes', authenticate, async (req, res) => {
+app.get('/api/admin/wheel-prizes', authenticateAdmin, async (req, res) => {
     try {
         const prizes = await prisma.wheelPrize.findMany({ orderBy: { probability: 'desc' } });
         res.json(prizes);
@@ -8133,7 +8180,7 @@ app.get('/api/admin/wheel-prizes', authenticate, async (req, res) => {
 });
 
 // إضافة جائزة
-app.post('/api/admin/wheel-prizes', authenticate, async (req, res) => {
+app.post('/api/admin/wheel-prizes', authenticateAdmin, async (req, res) => {
     try {
         const { name, value, type, color, probability, isActive, isWinnable } = req.body;
         const prize = await prisma.wheelPrize.create({
@@ -8154,7 +8201,7 @@ app.post('/api/admin/wheel-prizes', authenticate, async (req, res) => {
 });
 
 // تحديث جائزة
-app.put('/api/admin/wheel-prizes/:id', authenticate, async (req, res) => {
+app.put('/api/admin/wheel-prizes/:id', authenticateAdmin, async (req, res) => {
     try {
         const prize = await prisma.wheelPrize.update({
             where: { id: req.params.id },
@@ -8167,7 +8214,7 @@ app.put('/api/admin/wheel-prizes/:id', authenticate, async (req, res) => {
 });
 
 // حذف جائزة
-app.delete('/api/admin/wheel-prizes/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/wheel-prizes/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.wheelPrize.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -8177,7 +8224,7 @@ app.delete('/api/admin/wheel-prizes/:id', authenticate, async (req, res) => {
 });
 
 // جلب الريلز (Admin)
-app.get('/api/admin/reels', authenticate, async (req, res) => {
+app.get('/api/admin/reels', authenticateAdmin, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = 20;
@@ -8195,7 +8242,7 @@ app.get('/api/admin/reels', authenticate, async (req, res) => {
 });
 
 // حذف ريل
-app.delete('/api/admin/reels/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/reels/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.reel.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -8205,7 +8252,7 @@ app.delete('/api/admin/reels/:id', authenticate, async (req, res) => {
 });
 
 // جلب الستوريات (Admin)
-app.get('/api/admin/stories', authenticate, async (req, res) => {
+app.get('/api/admin/stories', authenticateAdmin, async (req, res) => {
     try {
         const stories = await prisma.story.findMany({
             include: { user: { select: { id: true, username: true, avatar: true } } },
@@ -8218,7 +8265,7 @@ app.get('/api/admin/stories', authenticate, async (req, res) => {
 });
 
 // حذف ستوري
-app.delete('/api/admin/stories/:id', authenticate, async (req, res) => {
+app.delete('/api/admin/stories/:id', authenticateAdmin, async (req, res) => {
     try {
         await prisma.story.delete({ where: { id: req.params.id } });
         res.json({ success: true });
@@ -8228,7 +8275,7 @@ app.delete('/api/admin/stories/:id', authenticate, async (req, res) => {
 });
 
 // جلب الإعدادات
-app.get('/api/admin/settings', authenticate, async (req, res) => {
+app.get('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
         // استخدام raw query لجلب جميع الحقول بما فيها الجديدة
         let settings = await prisma.$queryRaw`SELECT * FROM "AppSettings" WHERE "id" = 'settings'`;
@@ -8250,7 +8297,7 @@ app.get('/api/admin/settings', authenticate, async (req, res) => {
 });
 
 // تحديث الإعدادات
-app.put('/api/admin/settings', authenticate, async (req, res) => {
+app.put('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
         const {
             harvestCoins,
@@ -8756,7 +8803,7 @@ app.get('/terms', async (req, res) => {
 });
 
 // جلب جميع الصفحات القانونية (Admin)
-app.get('/api/admin/legal-pages', authenticate, async (req, res) => {
+app.get('/api/admin/legal-pages', authenticateAdmin, async (req, res) => {
     try {
         const pages = await prisma.$queryRaw`
             SELECT * FROM "LegalPage" ORDER BY "createdAt" ASC
@@ -8769,7 +8816,7 @@ app.get('/api/admin/legal-pages', authenticate, async (req, res) => {
 });
 
 // تحديث صفحة قانونية (Admin)
-app.put('/api/admin/legal-pages/:slug', authenticate, async (req, res) => {
+app.put('/api/admin/legal-pages/:slug', authenticateAdmin, async (req, res) => {
     try {
         const { slug } = req.params;
         const { title, content } = req.body;
@@ -9225,12 +9272,8 @@ app.get('/api/tasks/my-ads', authenticate, async (req, res) => {
 // ============================================================
 
 // الحصول على جميع المهام (للأدمن)
-app.get('/api/admin/tasks', authenticate, async (req, res) => {
+app.get('/api/admin/tasks', authenticateAdmin, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ error: 'غير مصرح' });
-        }
-        
         const tasks = await prisma.$queryRaw`
             SELECT t.*, 
                    (SELECT COUNT(*)::int FROM "task_completion" WHERE "taskId" = t.id) as "completionCount"
@@ -9246,12 +9289,8 @@ app.get('/api/admin/tasks', authenticate, async (req, res) => {
 });
 
 // إنشاء مهمة جديدة
-app.post('/api/admin/tasks', authenticate, async (req, res) => {
+app.post('/api/admin/tasks', authenticateAdmin, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ error: 'غير مصرح' });
-        }
-        
         const { name, description, image, url, reward, duration, cooldown, sortOrder } = req.body;
         
         if (!name || !url) {
@@ -9271,12 +9310,8 @@ app.post('/api/admin/tasks', authenticate, async (req, res) => {
 });
 
 // تحديث مهمة
-app.put('/api/admin/tasks/:taskId', authenticate, async (req, res) => {
+app.put('/api/admin/tasks/:taskId', authenticateAdmin, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ error: 'غير مصرح' });
-        }
-        
         const { taskId } = req.params;
         const { name, description, image, url, reward, duration, cooldown, isActive, sortOrder } = req.body;
         
@@ -9302,12 +9337,8 @@ app.put('/api/admin/tasks/:taskId', authenticate, async (req, res) => {
 });
 
 // حذف مهمة
-app.delete('/api/admin/tasks/:taskId', authenticate, async (req, res) => {
+app.delete('/api/admin/tasks/:taskId', authenticateAdmin, async (req, res) => {
     try {
-        if (!req.user.isAdmin) {
-            return res.status(403).json({ error: 'غير مصرح' });
-        }
-        
         const { taskId } = req.params;
         
         // حذف سجلات الإكمال أولاً

@@ -30,6 +30,7 @@ model User {
   banReason     String?                   // سبب الحظر
   isEmailVerified Boolean @default(false) // هل البريد مُتحقق منه
   deviceId      String?                   // معرف الجهاز
+  passwordChangedAt DateTime?             // تاريخ آخر تغيير لكلمة المرور
   lastSeen      DateTime @default(now())
   createdAt     DateTime @default(now())
   
