@@ -3078,6 +3078,11 @@ app.post('/api/gifts/send', authenticate, async (req, res) => {
         // التحقق من الكمية
         const giftQuantity = Math.min(Math.max(1, parseInt(quantity) || 1), 99);
         
+        // منع إرسال الهدية للنفس
+        if (receiverId && receiverId === req.user.id) {
+            return res.status(400).json({ error: 'لا يمكنك إرسال هدية لنفسك' });
+        }
+        
         // receiverId يمكن أن يكون null للإرسال للكل
         
         const gift = await prisma.gift.findUnique({ where: { id: giftId } });
