@@ -29,6 +29,7 @@ model User {
   isBanned      Boolean  @default(false)  // هل المستخدم محظور
   banReason     String?                   // سبب الحظر
   isEmailVerified Boolean @default(false) // هل البريد مُتحقق منه
+  deviceId      String?                   // معرف الجهاز
   lastSeen      DateTime @default(now())
   createdAt     DateTime @default(now())
   
@@ -637,4 +638,19 @@ model TaskCompletion {
   @@index([taskId])
   @@index([userId])
   @@map("task_completion")
+}
+
+
+// =================== الأجهزة المسجلة ===================
+model RegisteredDevice {
+  id        String   @id @default(uuid())
+  deviceId  String   @unique // معرف الجهاز الفريد
+  userId    String   // المستخدم المرتبط بالجهاز
+  platform  String?  // android, ios
+  model     String?  // موديل الجهاز
+  createdAt DateTime @default(now())
+  
+  @@index([deviceId])
+  @@index([userId])
+  @@map("registered_device")
 }

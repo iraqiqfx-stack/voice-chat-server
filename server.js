@@ -116,6 +116,22 @@ async function runMigrations() {
         `);
         // Email verification field
         await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isEmailVerified" BOOLEAN DEFAULT false;`);
+        // Device ID field for User
+        await prisma.$executeRawUnsafe(`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "deviceId" TEXT;`);
+        // RegisteredDevice table (الأجهزة المسجلة)
+        await prisma.$executeRawUnsafe(`
+            CREATE TABLE IF NOT EXISTS "registered_device" (
+                "id" TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                "deviceId" TEXT UNIQUE NOT NULL,
+                "userId" TEXT NOT NULL,
+                "platform" TEXT,
+                "model" TEXT,
+                "createdAt" TIMESTAMP DEFAULT NOW()
+            );
+        `);
+        // Create index on deviceId
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "registered_device_deviceId_idx" ON "registered_device"("deviceId");`);
+        await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "registered_device_userId_idx" ON "registered_device"("userId");`);
         console.log('✅ تم تحديث قاعدة البيانات بنجاح');
     } catch (error) {
         console.log('⚠️ تحذير migration:', error.message);
@@ -442,7 +458,7 @@ async function sendOTPEmail(email, otp, username) {
 // الخطوة 1: طلب التسجيل وإرسال OTP
 app.post('/api/auth/register/request-otp', async (req, res) => {
     try {
-        const { username, email, password, referralCode } = req.body;
+        const { username, email, password, referralCode, deviceId } = req.body;
         
         if (!username || !email || !password) {
             return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
@@ -457,6 +473,16 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
         const referrer = await prisma.user.findUnique({ where: { referralCode } });
         if (!referrer) {
             return res.status(400).json({ error: 'كود الدعوة غير صحيح' });
+        }
+        
+        // التحقق من Device ID - منع إنشاء أكثر من حساب على نفس الجهاز
+        if (deviceId) {
+            const existingDevice = await prisma.$queryRaw`
+                SELECT * FROM "registered_device" WHERE "deviceId" = ${deviceId} LIMIT 1
+            `;
+            if (existingDevice && existingDevice.length > 0) {
+                return res.status(400).json({ error: 'لا يمكن إنشاء أكثر من حساب على نفس الجهاز' });
+            }
         }
         
         // التحقق من طول كلمة المرور
@@ -496,7 +522,7 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
         otpStore.set(emailLower, {
             otp,
             expiresAt,
-            userData: { username, email: emailLower, password, referralCode }
+            userData: { username, email: emailLower, password, referralCode, deviceId }
         });
         
         // إرسال OTP
@@ -561,7 +587,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         // حذف OTP من التخزين
         otpStore.delete(emailLower);
         
-        const { username, password, referralCode } = storedData.userData;
+        const { username, password, referralCode, deviceId } = storedData.userData;
         
         // تشفير كلمة المرور
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -581,7 +607,8 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
             referralCode: generateReferralCode(),
             coins: 100,
             gems: 10,
-            isEmailVerified: true
+            isEmailVerified: true,
+            deviceId: deviceId || null
         };
         
         // إضافة المُحيل إذا وُجد
@@ -594,6 +621,20 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         const user = await prisma.user.create({ data: userData });
         
         console.log('✅ User created:', user.id);
+        
+        // تسجيل الجهاز في جدول الأجهزة المسجلة
+        if (deviceId) {
+            try {
+                await prisma.$executeRaw`
+                    INSERT INTO "registered_device" ("id", "deviceId", "userId", "platform", "createdAt")
+                    VALUES (gen_random_uuid()::text, ${deviceId}, ${user.id}, 'mobile', NOW())
+                    ON CONFLICT ("deviceId") DO NOTHING
+                `;
+                console.log('📱 Device registered:', deviceId);
+            } catch (deviceError) {
+                console.log('⚠️ Device registration warning:', deviceError.message);
+            }
+        }
         
         // مكافأة المُحيل
         if (referrer) {
