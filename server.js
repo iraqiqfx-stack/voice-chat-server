@@ -13,6 +13,13 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
+
+// طباعة المتغيرات للتشخيص
+console.log('🔍 Environment check:');
+console.log('  - JWT_SECRET exists:', !!process.env.JWT_SECRET);
+console.log('  - RESEND_API_KEY exists:', !!process.env.RESEND_API_KEY);
+console.log('  - All env keys:', Object.keys(process.env).filter(k => !k.includes('PATH')).join(', '));
+
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
     console.error('❌ JWT_SECRET is required! Set it in environment variables.');
@@ -26,7 +33,7 @@ if (!RESEND_KEY) {
     process.exit(1);
 }
 const resend = new Resend(RESEND_KEY);
-console.log('✅ Resend configured successfully');
+console.log('✅ All environment variables loaded successfully');
 
 // تخزين OTP مؤقتاً في الذاكرة (يمكن استخدام Redis في الإنتاج)
 const otpStore = new Map(); // { email: { otp, expiresAt, userData } }
