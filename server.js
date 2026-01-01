@@ -13,11 +13,18 @@ dotenv.config();
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'windo-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+    console.error('❌ JWT_SECRET is required! Set it in environment variables.');
+    process.exit(1);
+}
 
 // إعداد Resend لإرسال البريد الإلكتروني
-// استخدام المفتاح مباشرة لضمان عمله
-const RESEND_KEY = 're_NJKeHkfw_L47LdWxBhg92eJ85JsWJzVDX';
+const RESEND_KEY = process.env.RESEND_API_KEY;
+if (!RESEND_KEY) {
+    console.error('❌ RESEND_API_KEY is required! Set it in environment variables.');
+    process.exit(1);
+}
 const resend = new Resend(RESEND_KEY);
 console.log('✅ Resend configured successfully');
 
@@ -158,26 +165,89 @@ function formatRoomWithMicCheck(room) {
 }
 
 // Voice Server URL
-const VOICE_SERVER_URL = 'http://62.84.176.222:3001';
+const VOICE_SERVER_URL = process.env.VOICE_SERVER_URL || 'http://62.84.176.222:3001';
+
+// ============================================================
+// 🛡️ Rate Limiting - حماية من الهجمات
+// ============================================================
+const rateLimitStore = new Map();
+
+function rateLimit(windowMs, maxRequests) {
+    return (req, res, next) => {
+        const key = req.ip || req.connection.remoteAddress;
+        const now = Date.now();
+        
+        if (!rateLimitStore.has(key)) {
+            rateLimitStore.set(key, { count: 1, startTime: now });
+            return next();
+        }
+        
+        const record = rateLimitStore.get(key);
+        
+        if (now - record.startTime > windowMs) {
+            rateLimitStore.set(key, { count: 1, startTime: now });
+            return next();
+        }
+        
+        if (record.count >= maxRequests) {
+            return res.status(429).json({ 
+                error: 'طلبات كثيرة جداً، حاول مرة أخرى لاحقاً',
+                retryAfter: Math.ceil((windowMs - (now - record.startTime)) / 1000)
+            });
+        }
+        
+        record.count++;
+        next();
+    };
+}
+
+// تنظيف Rate Limit Store كل 5 دقائق
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, record] of rateLimitStore.entries()) {
+        if (now - record.startTime > 300000) { // 5 دقائق
+            rateLimitStore.delete(key);
+        }
+    }
+}, 300000);
+
+// Rate limiters
+const authRateLimit = rateLimit(60000, 5); // 5 طلبات في الدقيقة للمصادقة
+const apiRateLimit = rateLimit(60000, 100); // 100 طلب في الدقيقة للـ API العام
 
 // Middleware
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',') 
-  : ['http://localhost:5173', 'http://localhost:3000', 'http://192.168.0.116:5173'];
+  : ['http://localhost:5173', 'http://localhost:3000'];
 
 app.use(cors({
   origin: function(origin, callback) {
     // السماح للطلبات بدون origin (مثل التطبيقات المحمولة)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
-      callback(null, true);
+    // في الإنتاج، تحقق من القائمة المسموحة
+    if (process.env.NODE_ENV === 'production') {
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(null, true); // السماح للتطبيقات المحمولة
+      }
     } else {
-      callback(null, true); // السماح مؤقتاً لجميع الروابط
+      callback(null, true); // في التطوير، السماح للجميع
     }
   },
   credentials: true
 }));
-app.use(express.json());
+
+// Security headers
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+});
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // تقديم الملفات الثابتة (الفيديوهات والصور)
 import path from 'path';
@@ -456,7 +526,7 @@ async function sendOTPEmail(email, otp, username) {
 }
 
 // الخطوة 1: طلب التسجيل وإرسال OTP
-app.post('/api/auth/register/request-otp', async (req, res) => {
+app.post('/api/auth/register/request-otp', authRateLimit, async (req, res) => {
     try {
         const { username, email, password, referralCode, deviceId } = req.body;
         
@@ -536,9 +606,7 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
         res.json({ 
             success: true, 
             message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني',
-            email: emailLower,
-            // للاختبار فقط - احذف هذا في الإنتاج!
-            _debug_otp: process.env.NODE_ENV !== 'production' ? otp : undefined
+            email: emailLower
         });
         
     } catch (error) {
@@ -548,7 +616,7 @@ app.post('/api/auth/register/request-otp', async (req, res) => {
 });
 
 // الخطوة 2: التحقق من OTP وإكمال التسجيل
-app.post('/api/auth/register/verify-otp', async (req, res) => {
+app.post('/api/auth/register/verify-otp', authRateLimit, async (req, res) => {
     try {
         const { email, otp } = req.body;
         
@@ -675,7 +743,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
 });
 
 // إعادة إرسال OTP
-app.post('/api/auth/register/resend-otp', async (req, res) => {
+app.post('/api/auth/register/resend-otp', authRateLimit, async (req, res) => {
     try {
         const { email } = req.body;
         
@@ -811,7 +879,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // تسجيل الدخول
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimit, async (req, res) => {
     try {
         const { email, password } = req.body;
         
@@ -849,7 +917,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // استعادة كلمة المرور
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', authRateLimit, async (req, res) => {
     try {
         const { email } = req.body;
         const user = await prisma.user.findUnique({ where: { email } });
