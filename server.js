@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -405,13 +405,13 @@ async function sendOTPEmail(email, otp, username) {
         console.log('📤 Attempting to send OTP to:', email);
         
         const { data, error } = await resend.emails.send({
-            from: 'Windo <noreply@iqfx.shop>',
+            from: 'Witter <noreply@iqfx.shop>',
             to: email,
-            subject: '🔐 رمز التحقق - ويندو',
+            subject: '🔐 رمز التحقق - ويتر',
             html: `
                 <div dir="rtl" style="font-family: 'Segoe UI', Tahoma, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
                     <div style="background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; border-radius: 16px; text-align: center;">
-                        <h1 style="color: white; margin: 0; font-size: 28px;">ويندو</h1>
+                        <h1 style="color: white; margin: 0; font-size: 28px;">ويتر</h1>
                         <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">مرحباً ${username}!</p>
                     </div>
                     
@@ -656,7 +656,7 @@ app.post('/api/auth/register/verify-otp', async (req, res) => {
         await createNotification(
             user.id,
             'system',
-            '🎊 أهلاً بك في ويندو!',
+            '🎊 أهلاً بك في ويتر!',
             'حصلت على 100 عملة و 10 جواهر كهدية ترحيبية. استمتع بالتطبيق!',
             { coins: 100, gems: 10 }
         );
@@ -793,7 +793,7 @@ app.post('/api/auth/register', async (req, res) => {
         await createNotification(
             user.id,
             'system',
-            '🎊 أهلاً بك في ويندو!',
+            '🎊 أهلاً بك في ويتر!',
             'حصلت على 100 عملة و 10 جواهر كهدية ترحيبية. استمتع بالتطبيق!',
             { coins: 100, gems: 10 }
         );
@@ -8494,7 +8494,7 @@ app.get('/privacy-policy', async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title} - ويندو</title>
+    <title>${title} - ويتر</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -8598,7 +8598,7 @@ app.get('/terms', async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${title} - ويندو</title>
+    <title>${title} - ويتر</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -8734,7 +8734,7 @@ async function initLegalPages() {
         await prisma.$executeRaw`
             INSERT INTO "LegalPage" ("id", "slug", "title", "content")
             VALUES 
-                (gen_random_uuid()::text, 'privacy-policy', 'سياسة الخصوصية', 'مرحباً بك في تطبيق ويندو. نحن نحترم خصوصيتك ونلتزم بحماية بياناتك الشخصية.
+                (gen_random_uuid()::text, 'privacy-policy', 'سياسة الخصوصية', 'مرحباً بك في تطبيق ويتر. نحن نحترم خصوصيتك ونلتزم بحماية بياناتك الشخصية.
 
 نقوم بجمع المعلومات التالية:
 - معلومات الحساب (الاسم، البريد الإلكتروني)
@@ -8749,7 +8749,7 @@ async function initLegalPages() {
 لن نشارك معلوماتك مع أطراف ثالثة إلا بموافقتك أو عند الضرورة القانونية.
 
 للتواصل: support@windo.app'),
-                (gen_random_uuid()::text, 'terms', 'شروط الاستخدام', 'مرحباً بك في تطبيق ويندو. باستخدامك للتطبيق، فإنك توافق على الشروط التالية:
+                (gen_random_uuid()::text, 'terms', 'شروط الاستخدام', 'مرحباً بك في تطبيق ويتر. باستخدامك للتطبيق، فإنك توافق على الشروط التالية:
 
 1. الأهلية: يجب أن يكون عمرك 13 عاماً على الأقل.
 
@@ -9246,7 +9246,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
     console.log('║                                                            ║');
-    console.log('║   🚀  ويندو Backend Server (Prisma + PostgreSQL)         ║');
+    console.log('║   🚀  ويتر Backend Server (Prisma + PostgreSQL)         ║');
     console.log('║                                                            ║');
     console.log(`║   📡  Server: http://0.0.0.0:${PORT}                          ║`);
     console.log(`║   🔗  API:    http://192.168.0.116:${PORT}/api               ║`);
