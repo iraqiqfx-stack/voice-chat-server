@@ -9366,6 +9366,68 @@ app.delete('/api/admin/tasks/:taskId', authenticateAdmin, async (req, res) => {
     }
 });
 
+// جلب إكمالات مهمة معينة
+app.get('/api/admin/tasks/:taskId/completions', authenticateAdmin, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        
+        const completions = await prisma.$queryRaw`
+            SELECT tc.*, 
+                   u.id as "userId", u.name as "userName", u.email as "userEmail"
+            FROM "task_completion" tc
+            LEFT JOIN "User" u ON tc."userId" = u.id
+            WHERE tc."taskId" = ${taskId}
+            ORDER BY tc."completedAt" DESC
+        `;
+        
+        // تحويل البيانات للشكل المطلوب
+        const formattedCompletions = completions.map(c => ({
+            id: c.id,
+            taskId: c.taskId,
+            userId: c.userId,
+            completedAt: c.completedAt,
+            user: {
+                id: c.userId,
+                name: c.userName,
+                email: c.userEmail
+            }
+        }));
+        
+        res.json(formattedCompletions);
+    } catch (error) {
+        console.error('Get task completions error:', error);
+        res.status(500).json({ error: 'خطأ في جلب الإكمالات' });
+    }
+});
+
+// حذف جميع إكمالات مهمة معينة
+app.delete('/api/admin/tasks/:taskId/completions', authenticateAdmin, async (req, res) => {
+    try {
+        const { taskId } = req.params;
+        
+        await prisma.$executeRaw`DELETE FROM "task_completion" WHERE "taskId" = ${taskId}`;
+        
+        res.json({ success: true, message: 'تم حذف جميع الإكمالات بنجاح' });
+    } catch (error) {
+        console.error('Delete all completions error:', error);
+        res.status(500).json({ error: 'خطأ في حذف الإكمالات' });
+    }
+});
+
+// حذف إكمال واحد
+app.delete('/api/admin/task-completions/:completionId', authenticateAdmin, async (req, res) => {
+    try {
+        const { completionId } = req.params;
+        
+        await prisma.$executeRaw`DELETE FROM "task_completion" WHERE "id" = ${completionId}`;
+        
+        res.json({ success: true, message: 'تم حذف الإكمال بنجاح' });
+    } catch (error) {
+        console.error('Delete completion error:', error);
+        res.status(500).json({ error: 'خطأ في حذف الإكمال' });
+    }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('╔════════════════════════════════════════════════════════════╗');
