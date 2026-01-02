@@ -8919,6 +8919,19 @@ async function initHarvestReferralGems() {
 }
 initHarvestReferralGems();
 
+// إضافة عمود passwordChangedAt إذا لم يكن موجوداً
+async function initPasswordChangedAt() {
+    try {
+        await prisma.$executeRaw`
+            ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "passwordChangedAt" TIMESTAMP;
+        `;
+        console.log('✅ passwordChangedAt column initialized');
+    } catch (error) {
+        console.error('passwordChangedAt init error:', error.message);
+    }
+}
+initPasswordChangedAt();
+
 // ============================================================
 // 🧹 تنظيف الحضور التلقائي (Presence Cleanup)
 // ============================================================
